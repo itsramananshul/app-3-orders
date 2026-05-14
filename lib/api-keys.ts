@@ -1,4 +1,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { getInstanceName } from "./supabase";
+
+const APP_TYPE = "orders";
 
 // Service-role-only client — never call from the browser.
 function getAdminClient(): SupabaseClient {
@@ -115,6 +118,8 @@ export async function verifyApiKey(raw: string): Promise<ApiKeyRecord | null> {
     .from("api_keys")
     .select("*")
     .eq("key_hash", keyHash)
+    .eq("app_type", APP_TYPE)
+    .eq("instance_name", getInstanceName())
     .eq("is_revoked", false)
     .maybeSingle();
 
