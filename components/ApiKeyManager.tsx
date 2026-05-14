@@ -150,7 +150,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
   return (
     <>
       <div
-        className="fixed inset-0 z-40 bg-slate-950/70 backdrop-blur-sm"
+        className="fixed inset-0 z-40 bg-gray-900/30 backdrop-blur-sm"
         onClick={onClose}
         aria-hidden
       />
@@ -158,18 +158,16 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
         role="dialog"
         aria-modal="true"
         aria-label="API keys"
-        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"
+        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col border-l border-gray-200 bg-white shadow-2xl"
       >
-        <header className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
+        <header className="flex items-start justify-between border-b border-gray-200 px-5 py-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">
-              <span aria-hidden className="mr-2">
-                🔑
-              </span>
-              API Keys
-            </h2>
-            <p className="mt-1 text-xs text-slate-400">
-              Tokens with the <code className="text-slate-300">x-api-key</code>{" "}
+            <h2 className="text-lg font-semibold text-gray-900">API Keys</h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Tokens with the{" "}
+              <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] text-gray-700">
+                x-api-key
+              </code>{" "}
               header are required for every protected route in this instance.
             </p>
           </div>
@@ -177,16 +175,26 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
             type="button"
             onClick={onClose}
             aria-label="Close API keys panel"
-            className="rounded p-1 text-slate-400 hover:bg-slate-800 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+            className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
           >
-            <span aria-hidden className="text-2xl leading-none">
-              ×
-            </span>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+              aria-hidden
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
         </header>
 
-        <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
-          <span className="text-xs text-slate-400">
+        <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-5 py-3">
+          <span className="text-xs text-gray-500">
             {keys === null
               ? "Loading…"
               : `${keys.length} key${keys.length === 1 ? "" : "s"} total`}
@@ -198,23 +206,36 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
               setNewName("");
               setCreateOpen(true);
             }}
-            className="inline-flex items-center gap-1 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
+            className="inline-flex items-center gap-1 rounded-lg bg-teal-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
           >
-            + Generate new key
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-3.5 w-3.5"
+              aria-hidden
+            >
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Generate new key
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loadError ? (
-            <div className="mb-3 rounded-md bg-rose-500/10 px-3 py-2 text-xs text-rose-300 ring-1 ring-inset ring-rose-500/30">
+            <div className="mb-3 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-inset ring-rose-200">
               {loadError}
             </div>
           ) : null}
 
           {keys === null ? (
-            <p className="text-sm text-slate-500">Loading keys…</p>
+            <p className="text-sm text-gray-400">Loading keys…</p>
           ) : keys.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-700 px-4 py-10 text-center text-sm text-slate-500">
+            <div className="rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 px-4 py-10 text-center text-sm text-gray-500">
               No keys yet. Generate one to start authenticating requests.
             </div>
           ) : (
@@ -224,10 +245,10 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                 return (
                   <li
                     key={k.id}
-                    className={`rounded-lg border bg-slate-900/50 p-3 ${
+                    className={`rounded-lg border bg-white p-3 transition-shadow hover:shadow-sm ${
                       revoked
-                        ? "border-slate-800 opacity-70"
-                        : "border-slate-700"
+                        ? "border-gray-100 opacity-75"
+                        : "border-gray-200"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -236,46 +257,44 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                           <span
                             className={`text-sm font-medium ${
                               revoked
-                                ? "text-slate-400 line-through"
-                                : "text-slate-100"
+                                ? "text-gray-400 line-through"
+                                : "text-gray-900"
                             }`}
                           >
                             {k.name}
                           </span>
                           {revoked ? (
-                            <span className="rounded-sm bg-slate-700 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-300">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-rose-700 ring-1 ring-inset ring-rose-600/20">
+                              <span className="h-1 w-1 rounded-full bg-rose-500" />
                               Revoked
                             </span>
                           ) : (
-                            <span className="rounded-sm bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                              <span className="h-1 w-1 rounded-full bg-emerald-500" />
                               Active
                             </span>
                           )}
                         </div>
-                        <div className="mt-1 truncate font-mono text-xs text-slate-400">
+                        <div className="mt-1 truncate font-mono text-xs text-gray-500">
                           {k.key_prefix}
                         </div>
-                        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                        <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-gray-400">
                           <div>
-                            <dt className="inline text-slate-600">Created:</dt>{" "}
-                            <dd className="inline text-slate-400 tabular-nums">
+                            <dt className="inline text-gray-400">Created:</dt>{" "}
+                            <dd className="inline tabular-nums text-gray-600">
                               {formatDate(k.created_at)}
                             </dd>
                           </div>
                           <div>
-                            <dt className="inline text-slate-600">
-                              Last used:
-                            </dt>{" "}
-                            <dd className="inline text-slate-400 tabular-nums">
+                            <dt className="inline text-gray-400">Last used:</dt>{" "}
+                            <dd className="inline tabular-nums text-gray-600">
                               {formatDate(k.last_used_at)}
                             </dd>
                           </div>
                           {revoked ? (
                             <div className="col-span-2">
-                              <dt className="inline text-slate-600">
-                                Revoked:
-                              </dt>{" "}
-                              <dd className="inline text-rose-300/80 tabular-nums">
+                              <dt className="inline text-gray-400">Revoked:</dt>{" "}
+                              <dd className="inline tabular-nums text-rose-600">
                                 {formatDate(k.revoked_at)}
                               </dd>
                             </div>
@@ -289,7 +308,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                             setRevokeError(null);
                             setRevokeTarget(k);
                           }}
-                          className="shrink-0 rounded-md bg-rose-500/10 px-2.5 py-1 text-xs font-medium text-rose-300 ring-1 ring-inset ring-rose-500/30 hover:bg-rose-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                          className="shrink-0 rounded-md bg-white px-2.5 py-1 text-xs font-medium text-rose-600 ring-1 ring-inset ring-rose-200 hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                         >
                           Revoke
                         </button>
@@ -307,18 +326,22 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !createBusy) setCreateOpen(false);
+            if (e.target === e.currentTarget && !createBusy)
+              setCreateOpen(false);
           }}
         >
-          <div className="w-full max-w-md rounded-xl bg-slate-900 p-6 shadow-2xl ring-1 ring-slate-700">
-            <h3 className="text-lg font-semibold text-slate-100">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl ring-1 ring-gray-100">
+            <h3 className="text-lg font-semibold text-gray-900">
               Generate API key
             </h3>
-            <p className="mt-1 text-sm text-slate-400">
+            <p className="mt-1 text-sm text-gray-500">
               Pick a name that describes what this key is for (e.g.{" "}
-              <code className="text-slate-300">nexus-orchestrator</code>).
+              <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] text-gray-700">
+                nexus-orchestrator
+              </code>
+              ).
             </p>
             <form
               className="mt-4 space-y-4"
@@ -328,7 +351,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
               }}
             >
               <label className="block">
-                <span className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                <span className="text-xs font-medium uppercase tracking-wider text-gray-500">
                   Key name
                 </span>
                 <input
@@ -337,11 +360,11 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   disabled={createBusy}
-                  className="mt-2 w-full rounded-lg border-0 bg-slate-800 px-3 py-2 text-slate-100 ring-1 ring-inset ring-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500 disabled:opacity-60"
+                  className="mt-2 w-full rounded-lg border-0 bg-gray-50 px-3 py-2 text-gray-900 ring-1 ring-inset ring-gray-200 focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-60"
                 />
               </label>
               {createError ? (
-                <p className="rounded-md bg-rose-500/10 px-3 py-2 text-sm text-rose-300 ring-1 ring-inset ring-rose-500/30">
+                <p className="rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
                   {createError}
                 </p>
               ) : null}
@@ -350,14 +373,14 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                   type="button"
                   onClick={() => setCreateOpen(false)}
                   disabled={createBusy}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-60"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300 disabled:opacity-60"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={!newName.trim() || createBusy}
-                  className="rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-lg bg-teal-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {createBusy ? "Generating…" : "Generate"}
                 </button>
@@ -371,29 +394,59 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 p-4 backdrop-blur-sm"
         >
-          <div className="w-full max-w-lg rounded-xl bg-slate-900 p-6 shadow-2xl ring-1 ring-amber-500/40">
-            <h3 className="text-lg font-semibold text-slate-100">
-              <span aria-hidden className="mr-1">
-                ⚠
-              </span>
-              Save this key now
-            </h3>
-            <p className="mt-1 text-sm text-amber-200/90">
-              This key will <strong>never be shown again</strong>. Copy it now
-              and store it somewhere safe.
-            </p>
-            <div className="mt-4 break-all rounded-lg bg-slate-950 px-3 py-3 font-mono text-sm text-emerald-300 ring-1 ring-inset ring-slate-800">
+          <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl ring-1 ring-amber-200">
+            <div className="flex items-start gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-5 w-5"
+                  aria-hidden
+                >
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Save this key now
+                </h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  This key will <strong>never be shown again</strong>. Copy it
+                  and store it somewhere safe.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 break-all rounded-lg bg-gray-50 px-3 py-3 font-mono text-sm text-gray-900 ring-1 ring-inset ring-gray-200">
               {revealKey}
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => void copyRevealed()}
-                className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-700 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-2 text-sm font-medium text-teal-700 ring-1 ring-inset ring-teal-200 hover:bg-teal-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
               >
-                {copied ? "Copied!" : "Copy to clipboard"}
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-4 w-4"
+                  aria-hidden
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                {copied ? "Copied!" : "Copy"}
               </button>
               <button
                 type="button"
@@ -401,7 +454,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                   setRevealKey(null);
                   setCopied(false);
                 }}
-                className="rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                className="rounded-lg bg-teal-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
               >
                 I have saved it
               </button>
@@ -414,25 +467,32 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 p-4 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget && !revokeBusy) setRevokeTarget(null);
+            if (e.target === e.currentTarget && !revokeBusy)
+              setRevokeTarget(null);
           }}
         >
-          <div className="w-full max-w-md rounded-xl bg-slate-900 p-6 shadow-2xl ring-1 ring-rose-500/40">
-            <h3 className="text-lg font-semibold text-slate-100">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl ring-1 ring-rose-200">
+            <h3 className="text-lg font-semibold text-gray-900">
               Revoke this key?
             </h3>
-            <p className="mt-1 text-sm text-slate-400">
-              Anything using <span className="text-slate-200">{revokeTarget.name}</span>{" "}
-              will start receiving <code className="text-slate-300">401</code>{" "}
+            <p className="mt-1 text-sm text-gray-500">
+              Anything using{" "}
+              <span className="font-medium text-gray-800">
+                {revokeTarget.name}
+              </span>{" "}
+              will start receiving{" "}
+              <code className="rounded bg-gray-100 px-1 py-0.5 font-mono text-[11px] text-gray-700">
+                401
+              </code>{" "}
               responses. This cannot be undone.
             </p>
-            <div className="mt-3 rounded-md bg-slate-800/60 px-3 py-2 font-mono text-xs text-slate-400 ring-1 ring-inset ring-slate-700">
+            <div className="mt-3 rounded-md bg-gray-50 px-3 py-2 font-mono text-xs text-gray-600 ring-1 ring-inset ring-gray-200">
               {revokeTarget.key_prefix}
             </div>
             {revokeError ? (
-              <p className="mt-3 rounded-md bg-rose-500/10 px-3 py-2 text-sm text-rose-300 ring-1 ring-inset ring-rose-500/30">
+              <p className="mt-3 rounded-md bg-rose-50 px-3 py-2 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
                 {revokeError}
               </p>
             ) : null}
@@ -441,7 +501,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                 type="button"
                 onClick={() => setRevokeTarget(null)}
                 disabled={revokeBusy}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-slate-300 hover:bg-slate-800 disabled:opacity-60"
+                className="rounded-lg px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -449,7 +509,7 @@ export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
                 type="button"
                 onClick={() => void submitRevoke()}
                 disabled={revokeBusy}
-                className="rounded-lg bg-rose-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg bg-rose-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {revokeBusy ? "Revoking…" : "Revoke key"}
               </button>

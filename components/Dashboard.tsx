@@ -1,81 +1,95 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { NewOrderInput, Order, OrderPriority, OrderStatus } from "@/lib/types";
+import type {
+  NewOrderInput,
+  Order,
+  OrderStatus,
+} from "@/lib/types";
 import {
   ActivityFeed,
   type ActivityAction,
   type ActivityEntry,
 } from "./ActivityFeed";
 import { ApiKeyManager } from "./ApiKeyManager";
-import { ConnectionStatus, type ConnectionState } from "./ConnectionStatus";
-import {
-  FilterBar,
-  type PriorityFilter,
-  type StatusFilter,
-} from "./FilterBar";
+import { ComingSoon } from "./ComingSoon";
+import { DonutChart } from "./DonutChart";
+import { FilterDropdown, type StatusFilter } from "./FilterDropdown";
+import { MetricCard } from "./MetricCard";
 import { NewOrderModal } from "./NewOrderModal";
-import { NoteModal } from "./NoteModal";
-import { OrdersTable, type OrderActionKind } from "./OrdersTable";
-import { PriorityModal } from "./PriorityModal";
-import { StatCard } from "./StatCard";
-import { StatusModal } from "./StatusModal";
+import { PriorityOrders } from "./PriorityOrders";
+import { RecentOrders } from "./RecentOrders";
 import { Toast, type ToastState } from "./Toast";
+import { TopNav, type NavView } from "./TopNav";
 
 interface DashboardProps {
   instanceName: string;
 }
 
 const POLL_INTERVAL_MS = 5000;
-const STALE_THRESHOLD_MS = 15000;
 const ACTIVITY_MAX = 50;
 
-type ActionModal =
-  | { kind: "status"; order: Order }
-  | { kind: "priority"; order: Order }
-  | { kind: "note"; order: Order }
-  | { kind: "new" }
-  | null;
+const STATUS_LABEL: Record<OrderStatus, string> = {
+  PENDING: "Pending",
+  IN_PRODUCTION: "In Production",
+  READY_TO_SHIP: "Ready to Ship",
+  SHIPPED: "Shipped",
+  DELIVERED: "Delivered",
+  FLAGGED: "Flagged",
+};
 
-function todayLocalISO(now: Date): string {
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const dd = String(now.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
+const COMING_SOON_COPY: Record<
+  Exclude<NavView, "dashboard">,
+  { title: string; description: string }
+> = {
+  orders: {
+    title: "Orders — coming soon",
+    description:
+      "A full orders ledger with bulk actions, search, and exports lives here.",
+  },
+  customers: {
+    title: "Customers — coming soon",
+    description:
+      "Customer directory with order history, lifetime value, and contact details.",
+  },
+  products: {
+    title: "Products — coming soon",
+    description:
+      "Product catalog with SKUs, pricing, and inventory linkage across instances.",
+  },
+  reports: {
+    title: "Reports — coming soon",
+    description:
+      "Revenue, fulfillment, and SLA reporting with custom date ranges.",
+  },
+};
 
 function newActivityId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function formatCurrency(n: number): string {
-  return n.toLocaleString(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  });
+function scrollToRecent() {
+  const el = document.getElementById("recent-orders");
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 export function Dashboard({ instanceName }: DashboardProps) {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [actionModal, setActionModal] = useState<ActionModal>(null);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [view, setView] = useState<NavView>("dashboard");
+  const [filter, setFilter] = useState<StatusFilter>("ALL");
+  const [expanded, setExpanded] = useState(false);
 
-  const [lastSuccessAt, setLastSuccessAt] = useState<Date | null>(null);
-  const [lastFetchOk, setLastFetchOk] = useState<boolean>(true);
-  const [now, setNow] = useState<Date>(new Date());
+  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [apiKeysOpen, setApiKeysOpen] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
-  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>("ALL");
-  const [search, setSearch] = useState<string>("");
-  const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
+  const [newOrderOpen, setNewOrderOpen] = useState(false);
+  const [newOrderBusy, setNewOrderBusy] = useState(false);
+  const [newOrderError, setNewOrderError] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -97,11 +111,8 @@ export function Dashboard({ instanceName }: DashboardProps) {
       const data: Order[] = await res.json();
       setOrders(data);
       setLoadError(null);
-      setLastFetchOk(true);
-      setLastSuccessAt(new Date());
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") return;
-      setLastFetchOk(false);
       setLoadError(
         err instanceof Error ? err.message : "Failed to load orders",
       );
@@ -110,13 +121,11 @@ export function Dashboard({ instanceName }: DashboardProps) {
 
   useEffect(() => {
     void fetchOrders();
-    const pollId = setInterval(() => {
+    const id = setInterval(() => {
       void fetchOrders();
     }, POLL_INTERVAL_MS);
-    const tickId = setInterval(() => setNow(new Date()), 1000);
     return () => {
-      clearInterval(pollId);
-      clearInterval(tickId);
+      clearInterval(id);
       abortRef.current?.abort();
     };
   }, [fetchOrders]);
@@ -127,96 +136,112 @@ export function Dashboard({ instanceName }: DashboardProps) {
     return () => clearTimeout(id);
   }, [toast]);
 
-  const connectionState: ConnectionState = useMemo(() => {
-    if (!lastSuccessAt) return "connecting";
-    const age = now.getTime() - lastSuccessAt.getTime();
-    if (age > STALE_THRESHOLD_MS) return "stale";
-    if (!lastFetchOk) return "reconnecting";
-    return "live";
-  }, [lastSuccessAt, lastFetchOk, now]);
-
-  const today = useMemo(() => todayLocalISO(now), [now]);
-
   const stats = useMemo(() => {
     const list = orders ?? [];
     const totalOrders = list.length;
-    const flagged = list.filter((o) => o.status === "FLAGGED").length;
-    const overdue = list.filter(
-      (o) => o.due_date < today && o.status !== "DELIVERED",
-    ).length;
-    const totalValue = list.reduce((sum, o) => sum + o.total_value, 0);
-    return { totalOrders, flagged, overdue, totalValue };
-  }, [orders, today]);
+    const counts: Record<OrderStatus, number> = {
+      PENDING: 0,
+      IN_PRODUCTION: 0,
+      READY_TO_SHIP: 0,
+      SHIPPED: 0,
+      DELIVERED: 0,
+      FLAGGED: 0,
+    };
+    for (const o of list) counts[o.status] += 1;
+    return { totalOrders, counts };
+  }, [orders]);
 
-  const filtered = useMemo(() => {
-    const list = orders ?? [];
-    const term = search.trim().toLowerCase();
-    return list.filter((o) => {
-      if (statusFilter !== "ALL" && o.status !== statusFilter) return false;
-      if (priorityFilter !== "ALL" && o.priority !== priorityFilter)
-        return false;
-      if (overdueOnly && !(o.due_date < today && o.status !== "DELIVERED"))
-        return false;
-      if (term) {
-        const hay =
-          `${o.order_number} ${o.customer} ${o.product_sku} ${o.product_name}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
-      return true;
-    });
-  }, [orders, statusFilter, priorityFilter, search, overdueOnly, today]);
+  const filterCounts: Record<StatusFilter, number> = useMemo(
+    () => ({
+      ALL: stats.totalOrders,
+      PENDING: stats.counts.PENDING,
+      IN_PRODUCTION: stats.counts.IN_PRODUCTION,
+      READY_TO_SHIP: stats.counts.READY_TO_SHIP,
+      SHIPPED: stats.counts.SHIPPED,
+      DELIVERED: stats.counts.DELIVERED,
+      FLAGGED: stats.counts.FLAGGED,
+    }),
+    [stats],
+  );
 
   const appendActivity = useCallback((entry: ActivityEntry) => {
     setActivity((prev) => [entry, ...prev].slice(0, ACTIVITY_MAX));
   }, []);
 
-  const handleAction = useCallback(
-    (order: Order, action: OrderActionKind) => {
-      setActionError(null);
-      setActionModal({ kind: action, order });
-    },
-    [],
-  );
-
-  const handleCloseModal = useCallback(() => {
-    if (actionBusy) return;
-    setActionModal(null);
-    setActionError(null);
-  }, [actionBusy]);
-
-  const handleResetFilters = useCallback(() => {
-    setStatusFilter("ALL");
-    setPriorityFilter("ALL");
-    setSearch("");
-    setOverdueOnly(false);
-  }, []);
-
-  const submitMutation = useCallback(
-    async (params: {
-      url: string;
-      method: "POST" | "PATCH";
-      body: unknown;
-      action: ActivityAction;
-      orderNumber: string;
-      customer: string;
-      detail: string;
-      successMessage: string;
-      failurePrefix: string;
-    }) => {
-      setActionBusy(true);
-      setActionError(null);
+  const handleTransition = useCallback(
+    async (order: Order, target: OrderStatus) => {
+      if (busyOrderId) return;
+      setBusyOrderId(order.id);
+      const fromStatus = order.status;
       try {
-        const res = await fetch(params.url, {
-          method: params.method,
+        const res = await fetch(`/api/orders/${order.id}/status`, {
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(params.body),
+          body: JSON.stringify({ status: target }),
         });
         const body = (await res.json().catch(() => null)) as
-          | {
-              success?: boolean;
-              error?: string;
-              order?: Order;
-            }
+          | { success?: boolean; error?: string; order?: Order }
+          | null;
+        const ok = res.ok && body?.success === true;
+        if (!ok) {
+          throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
+        }
+
+        const action: ActivityAction = "status_change";
+        appendActivity({
+          id: newActivityId(),
+          timestamp: new Date(),
+          action,
+          orderNumber: order.order_number,
+          customer: order.customer,
+          fromStatus,
+          toStatus: target,
+          result: "success",
+        });
+        setToast({
+          id: Date.now(),
+          kind: "success",
+          message: `${order.order_number}: ${STATUS_LABEL[fromStatus]} → ${STATUS_LABEL[target]}`,
+        });
+        void fetchOrders();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Action failed";
+        appendActivity({
+          id: newActivityId(),
+          timestamp: new Date(),
+          action: "status_change",
+          orderNumber: order.order_number,
+          customer: order.customer,
+          fromStatus,
+          toStatus: target,
+          result: "failure",
+          message,
+        });
+        setToast({
+          id: Date.now(),
+          kind: "error",
+          message: `Status change failed: ${message}`,
+        });
+      } finally {
+        setBusyOrderId(null);
+      }
+    },
+    [busyOrderId, appendActivity, fetchOrders],
+  );
+
+  const handleCreateNewOrder = useCallback(
+    async (input: NewOrderInput) => {
+      if (newOrderBusy) return;
+      setNewOrderBusy(true);
+      setNewOrderError(null);
+      try {
+        const res = await fetch("/api/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const body = (await res.json().catch(() => null)) as
+          | { success?: boolean; error?: string; order?: Order }
           | null;
         const ok = res.ok && body?.success === true;
         if (!ok) {
@@ -226,320 +251,249 @@ export function Dashboard({ instanceName }: DashboardProps) {
         appendActivity({
           id: newActivityId(),
           timestamp: new Date(),
-          action: params.action,
-          orderNumber: params.orderNumber,
-          customer: params.customer,
-          detail: params.detail,
+          action: "created",
+          orderNumber: input.order_number,
+          customer: input.customer,
+          detail: `${input.product_sku} × ${input.quantity}`,
           result: "success",
         });
         setToast({
           id: Date.now(),
           kind: "success",
-          message: params.successMessage,
+          message: `Created order ${input.order_number}.`,
         });
-        setActionModal(null);
+        setNewOrderOpen(false);
         void fetchOrders();
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Action failed";
+        const message = err instanceof Error ? err.message : "Create failed";
         appendActivity({
           id: newActivityId(),
           timestamp: new Date(),
-          action: params.action,
-          orderNumber: params.orderNumber,
-          customer: params.customer,
-          detail: params.detail,
+          action: "created",
+          orderNumber: input.order_number,
+          customer: input.customer,
+          detail: `${input.product_sku} × ${input.quantity}`,
           result: "failure",
           message,
         });
-        setActionError(message);
+        setNewOrderError(message);
         setToast({
           id: Date.now(),
           kind: "error",
-          message: `${params.failurePrefix}: ${message}`,
+          message: `Create failed: ${message}`,
         });
       } finally {
-        setActionBusy(false);
+        setNewOrderBusy(false);
       }
     },
-    [appendActivity, fetchOrders],
+    [newOrderBusy, appendActivity, fetchOrders],
   );
 
-  const handleStatusSubmit = useCallback(
-    (newStatus: OrderStatus) => {
-      if (actionModal?.kind !== "status") return;
-      const o = actionModal.order;
-      void submitMutation({
-        url: `/api/orders/${o.id}/status`,
-        method: "PATCH",
-        body: { status: newStatus },
-        action: "status_change",
-        orderNumber: o.order_number,
-        customer: o.customer,
-        detail: `${o.status} → ${newStatus}`,
-        successMessage: `${o.order_number} status → ${newStatus.replace(/_/g, " ")}`,
-        failurePrefix: "Status change failed",
-      });
-    },
-    [actionModal, submitMutation],
-  );
+  const handleViewAll = useCallback(() => {
+    setFilter("ALL");
+    setExpanded(true);
+    setTimeout(scrollToRecent, 50);
+  }, []);
 
-  const handlePrioritySubmit = useCallback(
-    (newPriority: OrderPriority) => {
-      if (actionModal?.kind !== "priority") return;
-      const o = actionModal.order;
-      void submitMutation({
-        url: `/api/orders/${o.id}/priority`,
-        method: "PATCH",
-        body: { priority: newPriority },
-        action: "priority_change",
-        orderNumber: o.order_number,
-        customer: o.customer,
-        detail: `${o.priority} → ${newPriority}`,
-        successMessage: `${o.order_number} priority → ${newPriority}`,
-        failurePrefix: "Priority change failed",
-      });
-    },
-    [actionModal, submitMutation],
-  );
+  const handleViewStatus = useCallback((s: OrderStatus) => {
+    setFilter(s);
+    setExpanded(true);
+    setTimeout(scrollToRecent, 50);
+  }, []);
 
-  const handleNoteSubmit = useCallback(
-    (note: string) => {
-      if (actionModal?.kind !== "note") return;
-      const o = actionModal.order;
-      void submitMutation({
-        url: `/api/orders/${o.id}/note`,
-        method: "POST",
-        body: { note },
-        action: "note_added",
-        orderNumber: o.order_number,
-        customer: o.customer,
-        detail:
-          note.length > 50 ? `note: ${note.slice(0, 50)}…` : `note: ${note}`,
-        successMessage: `Note added to ${o.order_number}`,
-        failurePrefix: "Note failed",
-      });
-    },
-    [actionModal, submitMutation],
+  const donutSlices = useMemo(
+    () =>
+      [
+        { label: "Pending", value: stats.counts.PENDING, hex: "#f59e0b" },
+        {
+          label: "In Production",
+          value: stats.counts.IN_PRODUCTION,
+          hex: "#3b82f6",
+        },
+        {
+          label: "Ready to Ship",
+          value: stats.counts.READY_TO_SHIP,
+          hex: "#6366f1",
+        },
+        { label: "Shipped", value: stats.counts.SHIPPED, hex: "#14b8a6" },
+        {
+          label: "Delivered",
+          value: stats.counts.DELIVERED,
+          hex: "#10b981",
+        },
+        { label: "Flagged", value: stats.counts.FLAGGED, hex: "#ef4444" },
+      ].filter((s) => s.value > 0),
+    [stats],
   );
-
-  const handleNewOrderSubmit = useCallback(
-    (input: NewOrderInput) => {
-      void submitMutation({
-        url: "/api/orders",
-        method: "POST",
-        body: input,
-        action: "create",
-        orderNumber: input.order_number,
-        customer: input.customer,
-        detail: `${input.product_sku} × ${input.quantity}`,
-        successMessage: `Created order ${input.order_number}`,
-        failurePrefix: "Create failed",
-      });
-    },
-    [submitMutation],
-  );
-
-  const lastRefreshedAgo = useMemo(() => {
-    if (!lastSuccessAt) return null;
-    return Math.max(
-      0,
-      Math.floor((now.getTime() - lastSuccessAt.getTime()) / 1000),
-    );
-  }, [lastSuccessAt, now]);
 
   return (
-    <main className="mx-auto max-w-[1400px] px-6 py-8">
-      <header className="flex flex-col gap-4 border-b border-slate-800 pb-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-violet-400">
-              Orders Management
-            </p>
-            <h1 className="mt-1 text-3xl font-semibold text-slate-50">
-              {instanceName}{" "}
-              <span className="text-slate-500">— Orders Management</span>
-            </h1>
-            <p className="mt-1 text-sm text-slate-400">
-              Standalone orders instance. Auto-refreshes every 5 seconds.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="inline-flex items-center gap-2 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-300 ring-1 ring-inset ring-slate-700"
-              title="Set via INSTANCE_NAME env var. Read-only in the UI."
-            >
-              <svg
-                aria-hidden
-                viewBox="0 0 24 24"
-                className="h-3.5 w-3.5 text-slate-500"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <rect x="5" y="11" width="14" height="10" rx="2" />
-                <path d="M8 11V8a4 4 0 1 1 8 0v3" />
-              </svg>
-              Current Instance: {instanceName}
-            </span>
-            <ConnectionStatus state={connectionState} />
-            <button
-              type="button"
-              onClick={() => setApiKeysOpen(true)}
-              className="inline-flex items-center gap-1 rounded-full bg-slate-800/80 px-3 py-1 text-xs font-medium text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400"
-            >
-              <span aria-hidden>🔑</span> API Keys
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActionError(null);
-                setActionModal({ kind: "new" });
-              }}
-              className="inline-flex items-center gap-1 rounded-full bg-sky-500 px-3 py-1 text-xs font-semibold text-white shadow-sm hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-            >
-              + New order
-            </button>
-          </div>
-        </div>
+    <div>
+      <TopNav
+        instanceName={instanceName}
+        currentView={view}
+        onChangeView={(v) => {
+          setView(v);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+        onOpenApiKeys={() => setApiKeysOpen(true)}
+      />
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-          <span>
-            <span className="text-slate-500">Last refreshed:</span>{" "}
-            <span className="text-slate-300 tabular-nums">
-              {lastSuccessAt ? lastSuccessAt.toLocaleTimeString() : "—"}
-            </span>
-            {lastRefreshedAgo !== null ? (
-              <span className="ml-1 text-slate-500">
-                ({lastRefreshedAgo}s ago)
-              </span>
-            ) : null}
-          </span>
-          <span className="text-slate-700">·</span>
-          <span>
-            Polling every {Math.round(POLL_INTERVAL_MS / 1000)} s · stale after{" "}
-            {Math.round(STALE_THRESHOLD_MS / 1000)} s
-          </span>
-        </div>
-      </header>
-
-      <section className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total Orders" value={stats.totalOrders} />
-        <StatCard
-          label="Flagged Orders"
-          value={stats.flagged}
-          tone={stats.flagged > 0 ? "danger" : "default"}
-          hint={
-            stats.flagged > 0
-              ? "Health is degraded while > 0"
-              : "Nothing flagged"
-          }
-        />
-        <StatCard
-          label="Overdue Orders"
-          value={stats.overdue}
-          tone={stats.overdue > 0 ? "danger" : "default"}
-          hint={
-            stats.overdue > 0
-              ? `Due before ${today} & not delivered`
-              : "Nothing overdue"
-          }
-        />
-        <StatCard
-          label="Total Value"
-          value={formatCurrency(stats.totalValue)}
-          tone="success"
-          hint="Sum of quantity × unit price"
-        />
-      </section>
-
-      {loadError ? (
-        <div className="mt-6 rounded-md bg-rose-500/10 px-4 py-3 text-sm text-rose-300 ring-1 ring-inset ring-rose-500/30">
-          Failed to load orders: {loadError}
-        </div>
-      ) : null}
-
-      <section className="mt-6">
-        <FilterBar
-          statusFilter={statusFilter}
-          priorityFilter={priorityFilter}
-          search={search}
-          overdueOnly={overdueOnly}
-          onStatusChange={setStatusFilter}
-          onPriorityChange={setPriorityFilter}
-          onSearchChange={setSearch}
-          onOverdueChange={setOverdueOnly}
-          resultCount={filtered.length}
-          totalCount={orders?.length ?? 0}
-          onReset={handleResetFilters}
-        />
-      </section>
-
-      <section className="mt-4">
-        {orders === null && !loadError ? (
-          <div className="rounded-xl bg-slate-900/40 px-4 py-12 text-center text-sm text-slate-500 ring-1 ring-slate-800">
-            Loading orders…
-          </div>
+      <main className="mx-auto max-w-7xl px-6 py-6">
+        {view !== "dashboard" ? (
+          <>
+            <div className="mb-6 flex flex-col gap-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                {view}
+              </p>
+              <h1 className="text-2xl font-bold capitalize text-gray-900">
+                {view}
+              </h1>
+            </div>
+            <ComingSoon
+              title={COMING_SOON_COPY[view].title}
+              description={COMING_SOON_COPY[view].description}
+              onBack={() => setView("dashboard")}
+            />
+          </>
         ) : (
-          <OrdersTable
-            orders={filtered}
-            today={today}
-            onAction={handleAction}
-          />
+          <>
+            <div className="mb-6 flex items-end justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  Overview
+                </p>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {instanceName} Dashboard
+                </h1>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewOrderError(null);
+                    setNewOrderOpen(true);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg bg-teal-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-3.5 w-3.5"
+                    aria-hidden
+                  >
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  New Order
+                </button>
+                <FilterDropdown
+                  value={filter}
+                  counts={filterCounts}
+                  onChange={(v) => {
+                    setFilter(v);
+                    if (v !== "ALL") setExpanded(true);
+                  }}
+                />
+              </div>
+            </div>
+
+            {loadError ? (
+              <div className="mb-6 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
+                Failed to load orders: {loadError}
+              </div>
+            ) : null}
+
+            <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <MetricCard
+                label="Total Orders"
+                value={stats.totalOrders}
+                onViewDetail={handleViewAll}
+              />
+              <MetricCard
+                label="Pending"
+                value={stats.counts.PENDING}
+                hint={
+                  stats.counts.PENDING > 0
+                    ? "Awaiting start"
+                    : "All orders started"
+                }
+                onViewDetail={() => handleViewStatus("PENDING")}
+              />
+              <MetricCard
+                label="In Production"
+                value={stats.counts.IN_PRODUCTION}
+                hint="Currently being built"
+                onViewDetail={() => handleViewStatus("IN_PRODUCTION")}
+              />
+              <MetricCard
+                label="Completed"
+                value={stats.counts.DELIVERED}
+                hint="Delivered to customer"
+                onViewDetail={() => handleViewStatus("DELIVERED")}
+              />
+            </section>
+
+            <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-5">
+              <div className="lg:col-span-3">
+                <RecentOrders
+                  orders={orders ?? []}
+                  loading={orders === null}
+                  filter={filter}
+                  expanded={expanded}
+                  busyOrderId={busyOrderId}
+                  onTransition={handleTransition}
+                  onToggleExpand={() => setExpanded((v) => !v)}
+                />
+              </div>
+              <div className="flex flex-col gap-4 lg:col-span-2">
+                <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+                  <header className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                        Distribution
+                      </p>
+                      <h2 className="text-lg font-semibold text-gray-900">
+                        Status Breakdown
+                      </h2>
+                    </div>
+                  </header>
+                  <DonutChart
+                    total={stats.totalOrders}
+                    centerLabel="Orders"
+                    slices={donutSlices}
+                  />
+                </section>
+                <ActivityFeed entries={activity} />
+              </div>
+            </section>
+
+            <section className="mb-6">
+              <PriorityOrders
+                orders={orders ?? []}
+                busyOrderId={busyOrderId}
+                onTransition={handleTransition}
+                onViewAll={handleViewAll}
+              />
+            </section>
+          </>
         )}
-      </section>
-
-      <section className="mt-6">
-        <ActivityFeed entries={activity} />
-      </section>
-
-      <StatusModal
-        open={actionModal?.kind === "status"}
-        orderNumber={
-          actionModal?.kind === "status" ? actionModal.order.order_number : ""
-        }
-        currentStatus={
-          actionModal?.kind === "status" ? actionModal.order.status : "PENDING"
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleStatusSubmit}
-      />
-
-      <PriorityModal
-        open={actionModal?.kind === "priority"}
-        orderNumber={
-          actionModal?.kind === "priority" ? actionModal.order.order_number : ""
-        }
-        currentPriority={
-          actionModal?.kind === "priority" ? actionModal.order.priority : "NORMAL"
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handlePrioritySubmit}
-      />
-
-      <NoteModal
-        open={actionModal?.kind === "note"}
-        orderNumber={
-          actionModal?.kind === "note" ? actionModal.order.order_number : ""
-        }
-        existingNotes={
-          actionModal?.kind === "note" ? actionModal.order.notes : ""
-        }
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleNoteSubmit}
-      />
+      </main>
 
       <NewOrderModal
-        open={actionModal?.kind === "new"}
-        busy={actionBusy}
-        errorMessage={actionError}
-        onCancel={handleCloseModal}
-        onSubmit={handleNewOrderSubmit}
+        open={newOrderOpen}
+        busy={newOrderBusy}
+        errorMessage={newOrderError}
+        onCancel={() => {
+          if (!newOrderBusy) {
+            setNewOrderOpen(false);
+            setNewOrderError(null);
+          }
+        }}
+        onSubmit={handleCreateNewOrder}
       />
 
       <Toast toast={toast} onClose={() => setToast(null)} />
@@ -548,6 +502,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
         open={apiKeysOpen}
         onClose={() => setApiKeysOpen(false)}
       />
-    </main>
+    </div>
   );
 }

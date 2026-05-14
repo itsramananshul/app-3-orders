@@ -1,12 +1,8 @@
 "use client";
 
-export type ActivityAction =
-  | "create"
-  | "status_change"
-  | "priority_change"
-  | "note_added";
+import type { OrderStatus } from "@/lib/types";
 
-export type ActivityResult = "success" | "failure";
+export type ActivityAction = "created" | "status_change";
 
 export interface ActivityEntry {
   id: string;
@@ -14,8 +10,10 @@ export interface ActivityEntry {
   action: ActivityAction;
   orderNumber: string;
   customer: string;
-  detail: string;
-  result: ActivityResult;
+  fromStatus?: OrderStatus;
+  toStatus?: OrderStatus;
+  detail?: string;
+  result: "success" | "failure";
   message?: string;
 }
 
@@ -23,93 +21,106 @@ interface ActivityFeedProps {
   entries: ActivityEntry[];
 }
 
-const actionStyles: Record<ActivityAction, string> = {
-  create: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30",
-  status_change: "bg-sky-500/10 text-sky-300 ring-sky-500/30",
-  priority_change: "bg-violet-500/10 text-violet-300 ring-violet-500/30",
-  note_added: "bg-slate-500/10 text-slate-300 ring-slate-500/30",
+const actionLabel: Record<ActivityAction, string> = {
+  created: "Created",
+  status_change: "Status changed",
 };
 
-const actionLabels: Record<ActivityAction, string> = {
-  create: "create",
-  status_change: "status",
-  priority_change: "priority",
-  note_added: "note",
+const actionDot: Record<ActivityAction, string> = {
+  created: "#14b8a6",
+  status_change: "#3b82f6",
 };
 
-const resultStyles: Record<ActivityResult, string> = {
-  success: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30",
-  failure: "bg-rose-500/10 text-rose-300 ring-rose-500/30",
-};
+function formatTime(d: Date): string {
+  try {
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return d.toISOString().slice(11, 19);
+  }
+}
 
-function formatTime(ts: Date): string {
-  return ts.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+function prettyStatus(s: OrderStatus): string {
+  return s
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 export function ActivityFeed({ entries }: ActivityFeedProps) {
   return (
-    <section
-      aria-label="Recent activity"
-      className="rounded-xl bg-slate-900/40 ring-1 ring-slate-800"
-    >
-      <header className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+    <section className="h-full rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
+      <header className="mb-3 flex items-center justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-slate-100">
-            Recent Activity
-          </h2>
-          <p className="text-xs text-slate-500">
-            Local session log. Clears when you reload the page.
+          <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Live
           </p>
+          <h2 className="text-lg font-semibold text-gray-900">Activity Feed</h2>
         </div>
-        <span className="rounded-full bg-slate-800/80 px-2 py-0.5 text-xs font-medium text-slate-300">
-          {entries.length}
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Live
         </span>
       </header>
-
       {entries.length === 0 ? (
-        <div className="px-4 py-10 text-center text-sm text-slate-500">
-          No activity yet. Create an order or change a status to log events.
-        </div>
+        <p className="py-6 text-center text-sm text-gray-400">
+          No actions yet. Create an order or advance its status to see it here.
+        </p>
       ) : (
-        <ul className="max-h-80 divide-y divide-slate-800/70 overflow-y-auto">
-          {entries.map((e) => (
-            <li
-              key={e.id}
-              className="grid grid-cols-[auto_auto_1fr_auto] items-center gap-3 px-4 py-2.5 text-sm"
-            >
-              <span className="font-mono text-xs text-slate-500 tabular-nums">
-                {formatTime(e.timestamp)}
-              </span>
-              <span
-                className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${actionStyles[e.action]}`}
+        <ul className="max-h-72 space-y-2 overflow-y-auto pr-1">
+          {entries.map((e) => {
+            const transition =
+              e.action === "status_change" && e.fromStatus && e.toStatus
+                ? `${prettyStatus(e.fromStatus)} → ${prettyStatus(e.toStatus)}`
+                : e.detail ?? "";
+            return (
+              <li
+                key={e.id}
+                className={`flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 ${
+                  e.result === "failure" ? "border-rose-100 bg-rose-50/40" : ""
+                }`}
               >
-                {actionLabels[e.action]}
-              </span>
-              <span className="min-w-0 truncate text-slate-200">
-                <span className="font-mono text-xs text-slate-400">
-                  {e.orderNumber}
+                <span
+                  aria-hidden
+                  className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
+                  style={{
+                    background:
+                      e.result === "failure" ? "#ef4444" : actionDot[e.action],
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-gray-800">
+                    <span className="font-medium">{actionLabel[e.action]}</span>{" "}
+                    <span className="font-mono text-[11px] text-gray-500">
+                      {e.orderNumber}
+                    </span>
+                    {transition ? (
+                      <>
+                        {" — "}
+                        <span className="text-gray-600">{transition}</span>
+                      </>
+                    ) : null}
+                    {e.customer ? (
+                      <span className="ml-1 text-xs text-gray-400">
+                        · {e.customer}
+                      </span>
+                    ) : null}
+                  </p>
+                  {e.result === "failure" && e.message ? (
+                    <p className="mt-0.5 truncate text-xs text-rose-600">
+                      {e.message}
+                    </p>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-[11px] tabular-nums text-gray-400">
+                  {formatTime(e.timestamp)}
                 </span>
-                <span className="mx-1 text-slate-600">·</span>
-                <span className="text-slate-300">{e.customer}</span>
-                <span className="mx-1 text-slate-600">·</span>
-                <span className="text-slate-400">{e.detail}</span>
-                {e.result === "failure" && e.message ? (
-                  <span className="ml-1 text-xs text-rose-300/80">
-                    — {e.message}
-                  </span>
-                ) : null}
-              </span>
-              <span
-                className={`inline-flex rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ring-1 ring-inset ${resultStyles[e.result]}`}
-              >
-                {e.result}
-              </span>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>

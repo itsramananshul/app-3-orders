@@ -13,15 +13,14 @@ interface ToastProps {
   onClose: () => void;
 }
 
-const styles: Record<ToastKind, string> = {
-  success:
-    "bg-emerald-500/15 text-emerald-200 ring-emerald-500/40 [--dot:theme(colors.emerald.400)]",
-  error:
-    "bg-rose-500/15 text-rose-200 ring-rose-500/40 [--dot:theme(colors.rose.400)]",
+const styles: Record<ToastKind, { ring: string; dot: string }> = {
+  success: { ring: "ring-emerald-200", dot: "#10b981" },
+  error: { ring: "ring-rose-200", dot: "#ef4444" },
 };
 
 export function Toast({ toast, onClose }: ToastProps) {
   if (!toast) return null;
+  const s = styles[toast.kind];
   return (
     <div
       role="status"
@@ -29,18 +28,19 @@ export function Toast({ toast, onClose }: ToastProps) {
       className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4 sm:justify-end sm:px-6"
     >
       <div
-        className={`pointer-events-auto flex max-w-md items-start gap-3 rounded-lg px-4 py-3 shadow-2xl ring-1 ring-inset backdrop-blur-sm ${styles[toast.kind]}`}
+        className={`pointer-events-auto flex max-w-md items-start gap-3 rounded-lg bg-white px-4 py-3 shadow-lg ring-1 ${s.ring}`}
       >
         <span
           className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-          style={{ background: "var(--dot)" }}
+          style={{ background: s.dot }}
+          aria-hidden
         />
-        <p className="text-sm">{toast.message}</p>
+        <p className="text-sm text-gray-700">{toast.message}</p>
         <button
           type="button"
           onClick={onClose}
           aria-label="Dismiss notification"
-          className="ml-2 -mr-1 rounded p-1 text-slate-400 hover:bg-white/5 hover:text-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
+          className="-mr-1 ml-2 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-300"
         >
           <span aria-hidden>×</span>
         </button>
