@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authenticate } from "@/lib/authenticate";
 import {
   errorResponse,
   parseNewOrder,
@@ -9,7 +10,9 @@ import { StoreError, createOrder, listOrders } from "@/lib/orders-store";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  const authError = await authenticate(request);
+  if (authError) return authError;
   try {
     const orders = await listOrders();
     return NextResponse.json(orders);
@@ -25,6 +28,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const authError = await authenticate(request);
+  if (authError) return authError;
   const body = await readJsonBody(request);
   if (body === null) return errorResponse(400, "Invalid JSON body");
   const parsed = parseNewOrder(body);
