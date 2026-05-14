@@ -17,9 +17,6 @@ interface ApiKeyRecord {
 interface ApiKeyManagerProps {
   open: boolean;
   onClose: () => void;
-  currentKey: string | null;
-  onKeySet: (key: string) => void;
-  onKeyCleared: () => void;
 }
 
 function formatDate(s: string | null): string {
@@ -31,22 +28,9 @@ function formatDate(s: string | null): string {
   }
 }
 
-function previewKey(raw: string): string {
-  return raw.length > 16 ? `${raw.slice(0, 16)}…` : raw;
-}
-
-export function ApiKeyManager({
-  open,
-  onClose,
-  currentKey,
-  onKeySet,
-  onKeyCleared,
-}: ApiKeyManagerProps) {
+export function ApiKeyManager({ open, onClose }: ApiKeyManagerProps) {
   const [keys, setKeys] = useState<ApiKeyRecord[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [pasteValue, setPasteValue] = useState("");
-  const [pasteSavedFlash, setPasteSavedFlash] = useState(false);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -161,11 +145,6 @@ export function ApiKeyManager({
     }
   }, [revealKey]);
 
-  const flashPasteSaved = useCallback(() => {
-    setPasteSavedFlash(true);
-    setTimeout(() => setPasteSavedFlash(false), 1800);
-  }, []);
-
   if (!open) return null;
 
   return (
@@ -190,8 +169,8 @@ export function ApiKeyManager({
               API Keys
             </h2>
             <p className="mt-1 text-xs text-slate-400">
-              Generate keys for other clients (e.g. Nexus), and configure the
-              key this dashboard uses when it calls its own API.
+              Tokens with the <code className="text-slate-300">x-api-key</code>{" "}
+              header are required for every protected route in this instance.
             </p>
           </div>
           <button
@@ -205,78 +184,6 @@ export function ApiKeyManager({
             </span>
           </button>
         </header>
-
-        <section className="border-b border-slate-800 px-5 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                Active client key
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Sent as <code className="text-slate-300">x-api-key</code> on
-                every fetch from this browser.
-              </p>
-            </div>
-            {currentKey ? (
-              <span className="rounded-sm bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
-                Configured
-              </span>
-            ) : (
-              <span className="rounded-sm bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300 ring-1 ring-inset ring-amber-500/30">
-                Not set
-              </span>
-            )}
-          </div>
-
-          {currentKey ? (
-            <div className="mt-2 flex items-center gap-2">
-              <div className="flex-1 truncate rounded-md bg-slate-800/60 px-3 py-2 font-mono text-xs text-slate-300 ring-1 ring-inset ring-slate-700">
-                {previewKey(currentKey)}
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  onKeyCleared();
-                  setPasteValue("");
-                }}
-                className="rounded-md bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-200 ring-1 ring-inset ring-slate-700 hover:bg-slate-700"
-              >
-                Clear
-              </button>
-            </div>
-          ) : null}
-
-          <form
-            className="mt-2 flex items-stretch gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const trimmed = pasteValue.trim();
-              if (!trimmed) return;
-              onKeySet(trimmed);
-              setPasteValue("");
-              flashPasteSaved();
-            }}
-          >
-            <input
-              type="text"
-              value={pasteValue}
-              onChange={(e) => setPasteValue(e.target.value)}
-              placeholder={
-                currentKey
-                  ? "Paste a different key to replace it…"
-                  : "Paste an API key (sk_inv_…) and press Save"
-              }
-              className="flex-1 rounded-md border-0 bg-slate-800 px-3 py-2 text-sm text-slate-100 ring-1 ring-inset ring-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
-            />
-            <button
-              type="submit"
-              disabled={!pasteValue.trim()}
-              className="rounded-md bg-sky-500 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {pasteSavedFlash ? "Saved!" : "Save"}
-            </button>
-          </form>
-        </section>
 
         <div className="flex items-center justify-between border-b border-slate-800 px-5 py-3">
           <span className="text-xs text-slate-400">
@@ -474,31 +381,19 @@ export function ApiKeyManager({
               Save this key now
             </h3>
             <p className="mt-1 text-sm text-amber-200/90">
-              This key will <strong>never be shown again</strong>. Copy it now,
-              or save it directly as this dashboard&apos;s active key.
+              This key will <strong>never be shown again</strong>. Copy it now
+              and store it somewhere safe.
             </p>
             <div className="mt-4 break-all rounded-lg bg-slate-950 px-3 py-3 font-mono text-sm text-emerald-300 ring-1 ring-inset ring-slate-800">
               {revealKey}
             </div>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => void copyRevealed()}
                 className="rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-100 ring-1 ring-inset ring-slate-700 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500"
               >
                 {copied ? "Copied!" : "Copy to clipboard"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onKeySet(revealKey);
-                  setRevealKey(null);
-                  setCopied(false);
-                  flashPasteSaved();
-                }}
-                className="rounded-lg bg-sky-500 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-sky-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400"
-              >
-                Save &amp; use here
               </button>
               <button
                 type="button"

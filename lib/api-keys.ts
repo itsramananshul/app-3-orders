@@ -107,57 +107,6 @@ export async function revokeApiKey(
   if (error) throw new Error(error.message);
 }
 
-export async function getActiveClientKey(
-  appType: string,
-  instanceName: string,
-): Promise<string | null> {
-  const supabase = getAdminClient();
-  const { data, error } = await supabase
-    .from("active_client_keys")
-    .select("raw_key")
-    .eq("app_type", appType)
-    .eq("instance_name", instanceName)
-    .maybeSingle();
-  if (error || !data) return null;
-  const raw = (data as { raw_key?: string }).raw_key;
-  return typeof raw === "string" && raw.trim() !== "" ? raw : null;
-}
-
-export async function setActiveClientKey(
-  appType: string,
-  instanceName: string,
-  rawKey: string,
-): Promise<void> {
-  const trimmed = rawKey.trim();
-  if (trimmed === "") throw new Error("rawKey must be a non-empty string");
-  const supabase = getAdminClient();
-  const { error } = await supabase
-    .from("active_client_keys")
-    .upsert(
-      {
-        app_type: appType,
-        instance_name: instanceName,
-        raw_key: trimmed,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "app_type,instance_name" },
-    );
-  if (error) throw new Error(error.message);
-}
-
-export async function clearActiveClientKey(
-  appType: string,
-  instanceName: string,
-): Promise<void> {
-  const supabase = getAdminClient();
-  const { error } = await supabase
-    .from("active_client_keys")
-    .delete()
-    .eq("app_type", appType)
-    .eq("instance_name", instanceName);
-  if (error) throw new Error(error.message);
-}
-
 export async function verifyApiKey(raw: string): Promise<ApiKeyRecord | null> {
   const supabase = getAdminClient();
   const keyHash = await hashKey(raw);
