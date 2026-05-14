@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyApiKey } from "./api-keys";
+import { CORS_HEADERS } from "./api-helpers";
 
 /**
  * Server-side guard for protected API routes. The dashboard UI of this app
@@ -40,14 +41,14 @@ export async function authenticate(
   if (!raw) {
     return NextResponse.json(
       { success: false, error: "Missing x-api-key header" },
-      { status: 401 },
+      { status: 401, headers: CORS_HEADERS },
     );
   }
   const record = await verifyApiKey(raw);
   if (!record) {
     return NextResponse.json(
       { success: false, error: "Invalid or revoked API key" },
-      { status: 401 },
+      { status: 401, headers: CORS_HEADERS },
     );
   }
   return null;

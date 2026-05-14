@@ -1,6 +1,7 @@
 import { authenticate } from "@/lib/authenticate";
 import {
   errorResponse,
+  optionsResponse,
   parseNote,
   readJsonBody,
   runMutation,
@@ -21,3 +22,5 @@ export async function POST(
   if (!parsed.ok) return errorResponse(parsed.status, parsed.message);
   return runMutation(() => addNote(params.id, parsed.value));
 }
+
+export const OPTIONS = optionsResponse;

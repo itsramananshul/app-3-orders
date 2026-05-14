@@ -1,6 +1,7 @@
 import { authenticate } from "@/lib/authenticate";
 import {
   errorResponse,
+  optionsResponse,
   parseStatus,
   readJsonBody,
   runMutation,
@@ -21,3 +22,5 @@ export async function PATCH(
   if (!parsed.ok) return errorResponse(parsed.status, parsed.message);
   return runMutation(() => updateStatus(params.id, parsed.value));
 }
+
+export const OPTIONS = optionsResponse;
