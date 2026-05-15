@@ -5,22 +5,15 @@ import type {
   NewOrderInput,
   Order,
   OrderStatus,
+  OrderPriority,
 } from "@/lib/types";
 import {
-  ActivityFeed,
   type ActivityAction,
   type ActivityEntry,
 } from "./ActivityFeed";
 import { ApiKeyManager } from "./ApiKeyManager";
-import { ComingSoon } from "./ComingSoon";
-import { DonutChart } from "./DonutChart";
-import { FilterDropdown, type StatusFilter } from "./FilterDropdown";
-import { MetricCard } from "./MetricCard";
 import { NewOrderModal } from "./NewOrderModal";
-import { PriorityOrders } from "./PriorityOrders";
-import { RecentOrders } from "./RecentOrders";
 import { Toast, type ToastState } from "./Toast";
-import { TopNav, type NavView } from "./TopNav";
 
 interface DashboardProps {
   instanceName: string;
@@ -38,53 +31,73 @@ const STATUS_LABEL: Record<OrderStatus, string> = {
   FLAGGED: "Flagged",
 };
 
-const COMING_SOON_COPY: Record<
-  Exclude<NavView, "dashboard">,
-  { title: string; description: string }
-> = {
-  orders: {
-    title: "Orders — coming soon",
-    description:
-      "A full orders ledger with bulk actions, search, and exports lives here.",
-  },
-  customers: {
-    title: "Customers — coming soon",
-    description:
-      "Customer directory with order history, lifetime value, and contact details.",
-  },
-  products: {
-    title: "Products — coming soon",
-    description:
-      "Product catalog with SKUs, pricing, and inventory linkage across instances.",
-  },
-  reports: {
-    title: "Reports — coming soon",
-    description:
-      "Revenue, fulfillment, and SLA reporting with custom date ranges.",
-  },
-};
-
 function newActivityId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function scrollToRecent() {
-  const el = document.getElementById("recent-orders");
-  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+// ─── Display buckets ────────────────────────────────────────────────────
+// The schema has six statuses and four priorities. The spec asks for four
+// mutually-exclusive display buckets: Delivered, In Production, Pending,
+// URGENT (priority overrides status).
+type DisplayBucket = "delivered" | "in_production" | "pending" | "urgent";
+
+function bucketFor(o: Order): DisplayBucket {
+  if (o.priority === "URGENT") return "urgent";
+  if (o.status === "DELIVERED") return "delivered";
+  if (
+    o.status === "IN_PRODUCTION" ||
+    o.status === "READY_TO_SHIP" ||
+    o.status === "SHIPPED"
+  ) {
+    return "in_production";
+  }
+  return "pending"; // covers PENDING, FLAGGED
+}
+
+const BUCKET_STYLE: Record<
+  DisplayBucket,
+  { label: string; bg: string; fg: string; dot: string }
+> = {
+  delivered: { label: "Delivered", bg: "rgba(76,175,80,0.2)", fg: "#86efac", dot: "#4CAF50" },
+  in_production: { label: "In Production", bg: "rgba(59,130,246,0.2)", fg: "#93c5fd", dot: "#3b82f6" },
+  pending: { label: "Pending", bg: "rgba(245,158,11,0.2)", fg: "#fcd34d", dot: "#f59e0b" },
+  urgent: { label: "URGENT", bg: "rgba(239,68,68,0.2)", fg: "#fca5a5", dot: "#ef4444" },
+};
+
+function daysBetween(a: string, b: string): number {
+  const da = new Date(a).getTime();
+  const db = new Date(b).getTime();
+  if (Number.isNaN(da) || Number.isNaN(db)) return 0;
+  return Math.max(0, Math.round((db - da) / (1000 * 60 * 60 * 24)));
+}
+
+function formatMillions(v: number): string {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(1)}k`;
+  return `$${Math.round(v)}`;
+}
+
+function formatDate(s: string): string {
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export function Dashboard({ instanceName }: DashboardProps) {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [view, setView] = useState<NavView>("dashboard");
-  const [filter, setFilter] = useState<StatusFilter>("ALL");
-  const [expanded, setExpanded] = useState(false);
+  const [search, setSearch] = useState("");
+  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d" | "all">("30d");
+  const [plantFilter, setPlantFilter] = useState<string>("all");
 
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [, setActivity] = useState<ActivityEntry[]>([]);
   const [apiKeysOpen, setApiKeysOpen] = useState(false);
 
   const [newOrderOpen, setNewOrderOpen] = useState(false);
@@ -136,34 +149,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
     return () => clearTimeout(id);
   }, [toast]);
 
-  const stats = useMemo(() => {
-    const list = orders ?? [];
-    const totalOrders = list.length;
-    const counts: Record<OrderStatus, number> = {
-      PENDING: 0,
-      IN_PRODUCTION: 0,
-      READY_TO_SHIP: 0,
-      SHIPPED: 0,
-      DELIVERED: 0,
-      FLAGGED: 0,
-    };
-    for (const o of list) counts[o.status] += 1;
-    return { totalOrders, counts };
-  }, [orders]);
-
-  const filterCounts: Record<StatusFilter, number> = useMemo(
-    () => ({
-      ALL: stats.totalOrders,
-      PENDING: stats.counts.PENDING,
-      IN_PRODUCTION: stats.counts.IN_PRODUCTION,
-      READY_TO_SHIP: stats.counts.READY_TO_SHIP,
-      SHIPPED: stats.counts.SHIPPED,
-      DELIVERED: stats.counts.DELIVERED,
-      FLAGGED: stats.counts.FLAGGED,
-    }),
-    [stats],
-  );
-
   const appendActivity = useCallback((entry: ActivityEntry) => {
     setActivity((prev) => [entry, ...prev].slice(0, ACTIVITY_MAX));
   }, []);
@@ -186,7 +171,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
         if (!ok) {
           throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
         }
-
         const action: ActivityAction = "status_change";
         appendActivity({
           id: newActivityId(),
@@ -247,7 +231,6 @@ export function Dashboard({ instanceName }: DashboardProps) {
         if (!ok) {
           throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
         }
-
         appendActivity({
           id: newActivityId(),
           timestamp: new Date(),
@@ -289,209 +272,636 @@ export function Dashboard({ instanceName }: DashboardProps) {
     [newOrderBusy, appendActivity, fetchOrders],
   );
 
-  const handleViewAll = useCallback(() => {
-    setFilter("ALL");
-    setExpanded(true);
-    setTimeout(scrollToRecent, 50);
-  }, []);
+  // ─── Derived data ───────────────────────────────────────────────────
+  const allOrders = orders ?? [];
 
-  const handleViewStatus = useCallback((s: OrderStatus) => {
-    setFilter(s);
-    setExpanded(true);
-    setTimeout(scrollToRecent, 50);
-  }, []);
+  const plants = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of allOrders) set.add(o.instance_name);
+    return ["all", ...Array.from(set).sort()];
+  }, [allOrders]);
 
-  const donutSlices = useMemo(
-    () =>
-      [
-        { label: "Pending", value: stats.counts.PENDING, hex: "#f59e0b" },
-        {
-          label: "In Production",
-          value: stats.counts.IN_PRODUCTION,
-          hex: "#3b82f6",
-        },
-        {
-          label: "Ready to Ship",
-          value: stats.counts.READY_TO_SHIP,
-          hex: "#6366f1",
-        },
-        { label: "Shipped", value: stats.counts.SHIPPED, hex: "#14b8a6" },
-        {
-          label: "Delivered",
-          value: stats.counts.DELIVERED,
-          hex: "#10b981",
-        },
-        { label: "Flagged", value: stats.counts.FLAGGED, hex: "#ef4444" },
-      ].filter((s) => s.value > 0),
-    [stats],
-  );
+  // Time-range cutoff in ms
+  const cutoffMs = useMemo(() => {
+    if (timeRange === "all") return 0;
+    const days = timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 90;
+    return Date.now() - days * 24 * 60 * 60 * 1000;
+  }, [timeRange]);
+
+  const scopedOrders = useMemo(() => {
+    return allOrders.filter((o) => {
+      if (plantFilter !== "all" && o.instance_name !== plantFilter) return false;
+      if (cutoffMs > 0) {
+        const t = new Date(o.created_at).getTime();
+        if (!Number.isNaN(t) && t < cutoffMs) return false;
+      }
+      return true;
+    });
+  }, [allOrders, plantFilter, cutoffMs]);
+
+  const bucketCounts = useMemo(() => {
+    const c: Record<DisplayBucket, number> = {
+      delivered: 0,
+      in_production: 0,
+      pending: 0,
+      urgent: 0,
+    };
+    for (const o of scopedOrders) c[bucketFor(o)] += 1;
+    return c;
+  }, [scopedOrders]);
+
+  const kpis = useMemo(() => {
+    const list = scopedOrders;
+    const totalOrders = list.length;
+    const orderValue = list.reduce((s, o) => s + (o.total_value || 0), 0);
+    const urgent = list.filter((o) => o.priority === "URGENT").length;
+    const leadTimes = list
+      .map((o) => daysBetween(o.created_at, o.due_date))
+      .filter((d) => d > 0);
+    const avgLead =
+      leadTimes.length === 0
+        ? 0
+        : Math.round(leadTimes.reduce((s, d) => s + d, 0) / leadTimes.length);
+
+    // Deltas vs prior period of equal length. Only meaningful when a finite
+    // time range is applied; show "—" otherwise.
+    let deltaOrders: number | null = null;
+    let deltaValue: number | null = null;
+    let deltaUrgent: number | null = null;
+    let deltaLead: number | null = null;
+    if (cutoffMs > 0) {
+      const periodMs = Date.now() - cutoffMs;
+      const priorStart = cutoffMs - periodMs;
+      const prior = allOrders.filter((o) => {
+        const t = new Date(o.created_at).getTime();
+        return !Number.isNaN(t) && t >= priorStart && t < cutoffMs;
+      });
+      deltaOrders = totalOrders - prior.length;
+      deltaValue =
+        orderValue - prior.reduce((s, o) => s + (o.total_value || 0), 0);
+      deltaUrgent =
+        urgent - prior.filter((o) => o.priority === "URGENT").length;
+      const priorLeads = prior
+        .map((o) => daysBetween(o.created_at, o.due_date))
+        .filter((d) => d > 0);
+      const priorAvg =
+        priorLeads.length === 0
+          ? 0
+          : Math.round(priorLeads.reduce((s, d) => s + d, 0) / priorLeads.length);
+      deltaLead = avgLead - priorAvg;
+    }
+    return {
+      totalOrders,
+      orderValue,
+      urgent,
+      avgLead,
+      deltaOrders,
+      deltaValue,
+      deltaUrgent,
+      deltaLead,
+    };
+  }, [scopedOrders, allOrders, cutoffMs]);
+
+  // Bar chart: top 7 by count, grouped by customer (treated as supplier here
+  // since the orders schema has no separate supplier column).
+  const bars = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of scopedOrders) {
+      counts.set(o.customer, (counts.get(o.customer) ?? 0) + 1);
+    }
+    const arr = Array.from(counts.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 7);
+    const max = arr.reduce((m, x) => Math.max(m, x.count), 0) || 1;
+    return arr.map((x) => ({ ...x, pct: (x.count / max) * 100 }));
+  }, [scopedOrders]);
+
+  // Donut: 4 buckets as conic-gradient stops.
+  const donut = useMemo(() => {
+    const total = bucketCounts.delivered + bucketCounts.in_production + bucketCounts.pending + bucketCounts.urgent;
+    if (total === 0) {
+      return {
+        gradient: `conic-gradient(rgba(255,255,255,0.06) 0 100%)`,
+        slices: [
+          { key: "delivered", count: 0 },
+          { key: "in_production", count: 0 },
+          { key: "pending", count: 0 },
+          { key: "urgent", count: 0 },
+        ] as { key: DisplayBucket; count: number }[],
+        total: 0,
+      };
+    }
+    let cursor = 0;
+    const stops: string[] = [];
+    const order: DisplayBucket[] = ["delivered", "in_production", "pending", "urgent"];
+    for (const k of order) {
+      const pct = (bucketCounts[k] / total) * 100;
+      const next = cursor + pct;
+      stops.push(`${BUCKET_STYLE[k].dot} ${cursor}% ${next}%`);
+      cursor = next;
+    }
+    return {
+      gradient: `conic-gradient(${stops.join(", ")})`,
+      slices: order.map((k) => ({ key: k, count: bucketCounts[k] })),
+      total,
+    };
+  }, [bucketCounts]);
+
+  const filteredList = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return scopedOrders;
+    return scopedOrders.filter(
+      (o) =>
+        o.order_number.toLowerCase().includes(q) ||
+        o.customer.toLowerCase().includes(q) ||
+        o.product_sku.toLowerCase().includes(q) ||
+        o.product_name.toLowerCase().includes(q),
+    );
+  }, [scopedOrders, search]);
 
   return (
-    <div>
-      <TopNav
-        instanceName={instanceName}
-        currentView={view}
-        onChangeView={(v) => {
-          setView(v);
-          window.scrollTo({ top: 0, behavior: "smooth" });
+    <div
+      style={{
+        background: "#1a1d2e",
+        height: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        color: "#e5e7eb",
+      }}
+    >
+      {/* Top bar */}
+      <header
+        style={{
+          height: 48,
+          background: "#1a1d2e",
+          borderBottom: "1px solid rgba(255,255,255,0.07)",
+          padding: "0 20px",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
         }}
-        onOpenApiKeys={() => setApiKeysOpen(true)}
-      />
+      >
+        <div className="flex items-center gap-2">
+          <div
+            style={{
+              width: 24,
+              height: 24,
+              background: "#4CAF50",
+              borderRadius: 6,
+              color: "#ffffff",
+              fontSize: 12,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            aria-hidden
+          >
+            O
+          </div>
+          <span style={{ color: "#ffffff", fontSize: 14, fontWeight: 700 }}>
+            OpenPrem — Orders
+          </span>
+          <span style={{ color: "#6b7280", fontSize: 11, marginLeft: 8 }}>
+            · {instanceName}
+          </span>
+        </div>
 
-      <main className="mx-auto max-w-7xl px-6 py-6">
-        {view !== "dashboard" ? (
-          <>
-            <div className="mb-6 flex flex-col gap-1">
-              <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                {view}
-              </p>
-              <h1 className="text-2xl font-bold capitalize text-gray-900">
-                {view}
-              </h1>
+        <div className="ml-auto flex items-center gap-2">
+          <select
+            value={timeRange}
+            onChange={(e) =>
+              setTimeRange(e.target.value as "7d" | "30d" | "90d" | "all")
+            }
+            style={glassSelectStyle}
+          >
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+            <option value="90d">Last 90 days</option>
+            <option value="all">All time</option>
+          </select>
+          <select
+            value={plantFilter}
+            onChange={(e) => setPlantFilter(e.target.value)}
+            style={glassSelectStyle}
+          >
+            {plants.map((p) => (
+              <option key={p} value={p}>
+                {p === "all" ? "All plants" : p}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              setNewOrderError(null);
+              setNewOrderOpen(true);
+            }}
+            style={{
+              background: "#4CAF50",
+              color: "#ffffff",
+              border: "none",
+              padding: "6px 12px",
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            + New Order
+          </button>
+          <button
+            type="button"
+            onClick={() => setApiKeysOpen(true)}
+            title="Manage API keys"
+            style={{
+              ...glassSelectStyle,
+              cursor: "pointer",
+              padding: "6px 10px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="13"
+              height="13"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <circle cx="7.5" cy="15.5" r="5.5" />
+              <path d="m21 2-9.6 9.6" />
+              <path d="m15.5 7.5 3 3L22 7l-3-3" />
+            </svg>
+            API Keys
+          </button>
+        </div>
+      </header>
+
+      {/* Split body */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1.2fr",
+          flex: 1,
+          overflow: "hidden",
+        }}
+      >
+        {/* LEFT: analytics */}
+        <aside
+          style={{
+            borderRight: "1px solid rgba(255,255,255,0.07)",
+            overflowY: "auto",
+            padding: 16,
+          }}
+        >
+          <SectionTitle>Overview</SectionTitle>
+
+          {loadError ? (
+            <div
+              style={{
+                background: "rgba(239,68,68,0.15)",
+                color: "#fca5a5",
+                padding: "8px 12px",
+                borderRadius: 6,
+                fontSize: 11,
+                marginBottom: 10,
+              }}
+            >
+              {loadError}
             </div>
-            <ComingSoon
-              title={COMING_SOON_COPY[view].title}
-              description={COMING_SOON_COPY[view].description}
-              onBack={() => setView("dashboard")}
+          ) : null}
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 8,
+            }}
+          >
+            <KpiCard
+              label="Total Orders"
+              value={String(kpis.totalOrders)}
+              delta={kpis.deltaOrders}
             />
-          </>
-        ) : (
-          <>
-            <div className="mb-6 flex items-end justify-between gap-3">
-              <div className="flex flex-col gap-1">
-                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  Overview
-                </p>
-                <h1 className="text-2xl font-bold text-gray-900">
-                  {instanceName} Dashboard
-                </h1>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setNewOrderError(null);
-                    setNewOrderOpen(true);
+            <KpiCard
+              label="Order Value"
+              value={formatMillions(kpis.orderValue)}
+              delta={kpis.deltaValue}
+              deltaFormat={(d) => formatMillions(Math.abs(d))}
+            />
+            <KpiCard
+              label="Urgent"
+              value={String(kpis.urgent)}
+              valueColor="#ef4444"
+              delta={kpis.deltaUrgent}
+              deltaInverted
+            />
+            <KpiCard
+              label="Avg Lead Time"
+              value={`${kpis.avgLead}d`}
+              delta={kpis.deltaLead}
+              deltaFormat={(d) => `${Math.abs(d)}d`}
+              deltaInverted
+            />
+          </div>
+
+          {/* Bar chart */}
+          <div
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 8,
+              padding: 12,
+              marginTop: 14,
+            }}
+          >
+            <SectionTitle>Orders by Supplier</SectionTitle>
+            {bars.length === 0 ? (
+              <div style={{ color: "#6b7280", fontSize: 11 }}>No data.</div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-end",
+                    gap: 5,
+                    height: 70,
                   }}
-                  className="inline-flex items-center gap-1 rounded-lg bg-teal-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-teal-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-3.5 w-3.5"
-                    aria-hidden
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  New Order
-                </button>
-                <FilterDropdown
-                  value={filter}
-                  counts={filterCounts}
-                  onChange={(v) => {
-                    setFilter(v);
-                    if (v !== "ALL") setExpanded(true);
+                  {bars.map((b) => (
+                    <div
+                      key={b.name}
+                      style={{
+                        flex: 1,
+                        height: `${Math.max(6, b.pct)}%`,
+                        background: "#4CAF50",
+                        borderTopLeftRadius: 3,
+                        borderTopRightRadius: 3,
+                      }}
+                      title={`${b.name}: ${b.count}`}
+                    />
+                  ))}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 5,
+                    marginTop: 6,
                   }}
-                />
+                >
+                  {bars.map((b) => (
+                    <div
+                      key={`${b.name}-label`}
+                      style={{
+                        flex: 1,
+                        fontSize: 8,
+                        color: "#6b7280",
+                        textAlign: "center",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {b.name}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Donut */}
+          <div
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderRadius: 8,
+              padding: 12,
+              marginTop: 14,
+            }}
+          >
+            <SectionTitle>Status Breakdown</SectionTitle>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div
+                style={{
+                  width: 96,
+                  height: 96,
+                  borderRadius: "50%",
+                  background: donut.gradient,
+                  position: "relative",
+                  flexShrink: 0,
+                }}
+                aria-label="Order status donut"
+              >
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 18,
+                    background: "#1a1d2e",
+                    borderRadius: "50%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 16, fontWeight: 700, color: "#ffffff" }}>
+                    {donut.total}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#6b7280" }}>orders</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+                {donut.slices.map((s) => (
+                  <div
+                    key={s.key}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                      fontSize: 10,
+                      color: "#9ca3af",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 2,
+                        background: BUCKET_STYLE[s.key].dot,
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>{BUCKET_STYLE[s.key].label}</span>
+                    <span style={{ color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>
+                      {s.count}
+                    </span>
+                  </div>
+                ))}
               </div>
             </div>
+          </div>
+        </aside>
 
-            {loadError ? (
-              <div className="mb-6 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700 ring-1 ring-inset ring-rose-200">
-                Failed to load orders: {loadError}
+        {/* RIGHT: order list */}
+        <section style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+          <div
+            style={{
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(255,255,255,0.07)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <h2 style={{ fontSize: 12, color: "#ffffff", fontWeight: 600 }}>
+              All Orders
+            </h2>
+            <span style={{ fontSize: 10, color: "#6b7280" }}>
+              {filteredList.length} of {scopedOrders.length}
+            </span>
+            <input
+              type="search"
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{
+                ...glassSelectStyle,
+                width: 140,
+                marginLeft: "auto",
+                padding: "4px 10px",
+              }}
+            />
+          </div>
+
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {orders === null ? (
+              <div style={{ padding: 20, fontSize: 12, color: "#6b7280" }}>
+                Loading orders…
               </div>
-            ) : null}
-
-            <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <MetricCard
-                label="Total Orders"
-                value={stats.totalOrders}
-                onViewDetail={handleViewAll}
-              />
-              <MetricCard
-                label="Pending"
-                value={stats.counts.PENDING}
-                hint={
-                  stats.counts.PENDING > 0
-                    ? "Awaiting start"
-                    : "All orders started"
-                }
-                onViewDetail={() => handleViewStatus("PENDING")}
-              />
-              <MetricCard
-                label="In Production"
-                value={stats.counts.IN_PRODUCTION}
-                hint="Currently being built"
-                onViewDetail={() => handleViewStatus("IN_PRODUCTION")}
-              />
-              <MetricCard
-                label="Completed"
-                value={stats.counts.DELIVERED}
-                hint="Delivered to customer"
-                onViewDetail={() => handleViewStatus("DELIVERED")}
-              />
-            </section>
-
-            <section className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-5">
-              <div className="lg:col-span-3">
-                <RecentOrders
-                  orders={orders ?? []}
-                  loading={orders === null}
-                  filter={filter}
-                  expanded={expanded}
-                  busyOrderId={busyOrderId}
-                  onTransition={handleTransition}
-                  onToggleExpand={() => setExpanded((v) => !v)}
-                />
+            ) : filteredList.length === 0 ? (
+              <div style={{ padding: 20, fontSize: 12, color: "#6b7280" }}>
+                No orders match the current filters.
               </div>
-              <div className="flex flex-col gap-4 lg:col-span-2">
-                <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-gray-100">
-                  <header className="mb-4 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                        Distribution
-                      </p>
-                      <h2 className="text-lg font-semibold text-gray-900">
-                        Status Breakdown
-                      </h2>
+            ) : (
+              filteredList.map((o) => {
+                const bucket = bucketFor(o);
+                const style = BUCKET_STYLE[bucket];
+                return (
+                  <div
+                    key={o.id}
+                    style={{
+                      padding: "12px 16px",
+                      borderBottom: "1px solid rgba(255,255,255,0.05)",
+                      display: "grid",
+                      gridTemplateColumns: "1fr auto",
+                      gap: 12,
+                      transition: "background 120ms ease",
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.background = "rgba(255,255,255,0.03)")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.background = "transparent")
+                    }
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "#6b7280",
+                          fontFamily:
+                            'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        }}
+                      >
+                        {o.order_number}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#ffffff",
+                          fontWeight: 500,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {o.customer}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 10,
+                          color: "#6b7280",
+                          marginTop: 2,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {o.instance_name} · {o.product_name} × {o.quantity}
+                      </div>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          marginTop: 6,
+                          background: style.bg,
+                          color: style.fg,
+                          fontSize: 9,
+                          fontWeight: 600,
+                          padding: "2px 7px",
+                          borderRadius: 10,
+                          letterSpacing: "0.03em",
+                          textTransform: bucket === "urgent" ? "uppercase" : "none",
+                        }}
+                      >
+                        {style.label}
+                      </span>
                     </div>
-                  </header>
-                  <DonutChart
-                    total={stats.totalOrders}
-                    centerLabel="Orders"
-                    slices={donutSlices}
-                  />
-                </section>
-                <ActivityFeed entries={activity} />
-              </div>
-            </section>
-
-            <section className="mb-6">
-              <PriorityOrders
-                orders={orders ?? []}
-                busyOrderId={busyOrderId}
-                onTransition={handleTransition}
-                onViewAll={handleViewAll}
-              />
-            </section>
-          </>
-        )}
-      </main>
+                    <div
+                      style={{
+                        textAlign: "right",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#4CAF50",
+                          fontWeight: 700,
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {formatMillions(o.total_value)}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                        due {formatDate(o.due_date)}
+                      </div>
+                      <PriorityHint priority={o.priority} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+      </div>
 
       <NewOrderModal
         open={newOrderOpen}
         busy={newOrderBusy}
         errorMessage={newOrderError}
         onCancel={() => {
-          if (!newOrderBusy) {
-            setNewOrderOpen(false);
-            setNewOrderError(null);
-          }
+          if (newOrderBusy) return;
+          setNewOrderOpen(false);
+          setNewOrderError(null);
         }}
         onSubmit={handleCreateNewOrder}
       />
@@ -504,4 +914,116 @@ export function Dashboard({ instanceName }: DashboardProps) {
       />
     </div>
   );
+}
+
+const glassSelectStyle: React.CSSProperties = {
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  color: "#aaa",
+  borderRadius: 6,
+  fontSize: 11,
+  padding: "4px 10px",
+  outline: "none",
+};
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        color: "#6b7280",
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        fontWeight: 700,
+        marginBottom: 10,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  valueColor = "#ffffff",
+  delta,
+  deltaFormat,
+  deltaInverted,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+  delta?: number | null;
+  deltaFormat?: (n: number) => string;
+  deltaInverted?: boolean;
+}) {
+  let deltaNode: React.ReactNode = null;
+  if (delta === null || delta === undefined) {
+    deltaNode = <span style={{ color: "#6b7280" }}>— vs prior period</span>;
+  } else {
+    const isPositive = delta > 0;
+    const isNeutral = delta === 0;
+    // For "good = lower" metrics (urgents, lead time), invert the color sense.
+    const good = deltaInverted ? delta < 0 : delta > 0;
+    const color = isNeutral
+      ? "#6b7280"
+      : good
+        ? "#4CAF50"
+        : "#ef4444";
+    const sign = isPositive ? "+" : delta < 0 ? "−" : "";
+    const formatted = deltaFormat ? deltaFormat(delta) : String(Math.abs(delta));
+    deltaNode = (
+      <span style={{ color }}>
+        {sign}
+        {formatted} vs prior
+      </span>
+    );
+  }
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 8,
+        padding: 12,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 20,
+          fontWeight: 700,
+          color: valueColor,
+          lineHeight: 1.1,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          fontSize: 10,
+          color: "#6b7280",
+          marginTop: 4,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em",
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: 10, marginTop: 2 }}>{deltaNode}</div>
+    </div>
+  );
+}
+
+function PriorityHint({ priority }: { priority: OrderPriority }) {
+  if (priority === "URGENT" || priority === "HIGH") {
+    return (
+      <div style={{ fontSize: 9, color: "#fcd34d", marginTop: 2 }}>
+        {priority}
+      </div>
+    );
+  }
+  return null;
 }
