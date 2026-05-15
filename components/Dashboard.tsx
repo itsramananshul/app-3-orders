@@ -136,10 +136,12 @@ export function Dashboard({ instanceName }: DashboardProps) {
   const [orders, setOrders] = useState<Order[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  const [topTab, setTopTab] = useState<"orders" | "customers" | "products" | "reports">("orders");
   const [search, setSearch] = useState("");
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "all">("30d");
   const [plantFilter, setPlantFilter] = useState<string>("all");
   const [supplierFilter, setSupplierFilter] = useState<string | null>(null);
+  const [productFilter, setProductFilter] = useState<string | null>(null);
   const [bucketFilter, setBucketFilter] = useState<DisplayBucket | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -418,6 +420,7 @@ export function Dashboard({ instanceName }: DashboardProps) {
   const filteredList = useMemo(() => {
     let scoped = scopedOrders;
     if (supplierFilter) scoped = scoped.filter((o) => o.customer === supplierFilter);
+    if (productFilter) scoped = scoped.filter((o) => o.product_sku === productFilter);
     if (bucketFilter) scoped = scoped.filter((o) => bucketFor(o) === bucketFilter);
     const q = search.trim().toLowerCase();
     if (!q) return scoped;
@@ -428,19 +431,185 @@ export function Dashboard({ instanceName }: DashboardProps) {
         o.product_sku.toLowerCase().includes(q) ||
         o.product_name.toLowerCase().includes(q),
     );
-  }, [scopedOrders, supplierFilter, bucketFilter, search]);
+  }, [scopedOrders, supplierFilter, productFilter, bucketFilter, search]);
 
   const activeFilterChips: { label: string; clear: () => void }[] = [];
   if (supplierFilter)
     activeFilterChips.push({
-      label: `Supplier: ${supplierFilter}`,
+      label: `Customer: ${supplierFilter}`,
       clear: () => setSupplierFilter(null),
     });
+  if (productFilter) {
+    const productName =
+      scopedOrders.find((o) => o.product_sku === productFilter)?.product_name ??
+      productFilter;
+    activeFilterChips.push({
+      label: `Product: ${productName}`,
+      clear: () => setProductFilter(null),
+    });
+  }
   if (bucketFilter)
     activeFilterChips.push({
       label: `Status: ${BUCKET_STYLE[bucketFilter].label}`,
       clear: () => setBucketFilter(null),
     });
+
+  // ─── Tab data: customers, products, reports ───────────────────────────
+  const customerRows = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        customer: string;
+        orders: number;
+        value: number;
+        last: string;
+        delivered: number;
+        pending: number;
+        productCounts: Map<string, number>;
+      }
+    >();
+    for (const o of scopedOrders) {
+      const g =
+        m.get(o.customer) ?? {
+          customer: o.customer,
+          orders: 0,
+          value: 0,
+          last: o.created_at,
+          delivered: 0,
+          pending: 0,
+          productCounts: new Map<string, number>(),
+        };
+      g.orders += 1;
+      g.value += o.total_value || 0;
+      if (new Date(o.created_at).getTime() > new Date(g.last).getTime()) g.last = o.created_at;
+      if (o.status === "DELIVERED") g.delivered += 1;
+      else if (o.status === "PENDING") g.pending += 1;
+      g.productCounts.set(o.product_name, (g.productCounts.get(o.product_name) ?? 0) + 1);
+      m.set(o.customer, g);
+    }
+    return Array.from(m.values()).map((g) => {
+      let topProduct = "—";
+      let topCount = 0;
+      for (const [name, count] of g.productCounts) {
+        if (count > topCount) {
+          topProduct = name;
+          topCount = count;
+        }
+      }
+      return {
+        customer: g.customer,
+        orders: g.orders,
+        value: g.value,
+        last: g.last,
+        delivered: g.delivered,
+        pending: g.pending,
+        topProduct,
+      };
+    });
+  }, [scopedOrders]);
+
+  const productRows = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        sku: string;
+        name: string;
+        times: number;
+        quantity: number;
+        value: number;
+        plantCounts: Map<string, number>;
+        last: string;
+      }
+    >();
+    for (const o of scopedOrders) {
+      const g =
+        m.get(o.product_sku) ?? {
+          sku: o.product_sku,
+          name: o.product_name,
+          times: 0,
+          quantity: 0,
+          value: 0,
+          plantCounts: new Map<string, number>(),
+          last: o.created_at,
+        };
+      g.times += 1;
+      g.quantity += o.quantity;
+      g.value += o.total_value || 0;
+      g.plantCounts.set(o.instance_name, (g.plantCounts.get(o.instance_name) ?? 0) + 1);
+      if (new Date(o.created_at).getTime() > new Date(g.last).getTime()) g.last = o.created_at;
+      m.set(o.product_sku, g);
+    }
+    return Array.from(m.values()).map((g) => {
+      let topPlant = "—";
+      let topCount = 0;
+      for (const [name, count] of g.plantCounts) {
+        if (count > topCount) {
+          topPlant = name;
+          topCount = count;
+        }
+      }
+      return {
+        sku: g.sku,
+        name: g.name,
+        times: g.times,
+        quantity: g.quantity,
+        value: g.value,
+        topPlant,
+        last: g.last,
+      };
+    });
+  }, [scopedOrders]);
+
+  const reportsData = useMemo(() => {
+    const list = scopedOrders;
+    const statusCounts: Record<DisplayBucket, number> = {
+      delivered: 0,
+      in_production: 0,
+      pending: 0,
+      delayed: 0,
+      urgent: 0,
+    };
+    for (const o of list) statusCounts[bucketFor(o)] += 1;
+
+    // Weekly volume from created_at — last 8 weeks
+    const weekly = new Map<string, number>();
+    for (const o of list) {
+      const d = new Date(o.created_at);
+      if (Number.isNaN(d.getTime())) continue;
+      const day = (d.getUTCDay() + 6) % 7;
+      const monday = new Date(d);
+      monday.setUTCDate(d.getUTCDate() - day);
+      const key = monday.toISOString().slice(0, 10);
+      weekly.set(key, (weekly.get(key) ?? 0) + 1);
+    }
+    const weeklyArr = Array.from(weekly.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .slice(-8);
+
+    // Top customers by value
+    const topCustomers = customerRows
+      .slice()
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 7);
+
+    return { statusCounts, weeklyArr, topCustomers };
+  }, [scopedOrders, customerRows]);
+
+  const switchToOrdersFor = useCallback(
+    (opts: { customer?: string; productSku?: string }) => {
+      if (opts.customer) {
+        setSupplierFilter(opts.customer);
+        setProductFilter(null);
+      }
+      if (opts.productSku) {
+        setProductFilter(opts.productSku);
+        setSupplierFilter(null);
+      }
+      setBucketFilter(null);
+      setTopTab("orders");
+    },
+    [],
+  );
 
   return (
     <div
@@ -565,7 +734,10 @@ export function Dashboard({ instanceName }: DashboardProps) {
         </div>
       </header>
 
-      {/* Split body */}
+      {/* Tab bar */}
+      <TabsBar tab={topTab} onChange={setTopTab} />
+
+      {topTab === "orders" ? (
       <div
         style={{
           display: "grid",
@@ -898,6 +1070,19 @@ export function Dashboard({ instanceName }: DashboardProps) {
           </div>
         </section>
       </div>
+      ) : topTab === "customers" ? (
+        <CustomersView
+          rows={customerRows}
+          onView={(c) => switchToOrdersFor({ customer: c })}
+        />
+      ) : topTab === "products" ? (
+        <ProductsView
+          rows={productRows}
+          onView={(sku) => switchToOrdersFor({ productSku: sku })}
+        />
+      ) : (
+        <ReportsView data={reportsData} />
+      )}
 
       <NewOrderModal
         open={newOrderOpen}
@@ -1298,3 +1483,564 @@ function TimelineRow({
 
 // Re-export so the type isn't flagged unused at the import site
 export type _OrderPriority = OrderPriority;
+
+// ─── Tabs + alternate views ───────────────────────────────────────────────
+
+const TABS: { key: "orders" | "customers" | "products" | "reports"; label: string }[] = [
+  { key: "orders", label: "Orders" },
+  { key: "customers", label: "Customers" },
+  { key: "products", label: "Products" },
+  { key: "reports", label: "Reports" },
+];
+
+function TabsBar({
+  tab,
+  onChange,
+}: {
+  tab: "orders" | "customers" | "products" | "reports";
+  onChange: (t: "orders" | "customers" | "products" | "reports") => void;
+}) {
+  return (
+    <div
+      style={{
+        background: "#0f1117",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        padding: "0 20px",
+        display: "flex",
+        alignItems: "stretch",
+      }}
+    >
+      {TABS.map((t) => {
+        const active = tab === t.key;
+        return (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: "10px 16px",
+              fontSize: 12,
+              color: active ? "#4CAF50" : "#9ca3af",
+              fontWeight: active ? 600 : 500,
+              borderBottom: active ? "2px solid #4CAF50" : "2px solid transparent",
+              marginBottom: -1,
+              transition: "color 120ms ease",
+            }}
+          >
+            {t.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+type CustomerRow = {
+  customer: string;
+  orders: number;
+  value: number;
+  last: string;
+  delivered: number;
+  pending: number;
+  topProduct: string;
+};
+
+type ProductRow = {
+  sku: string;
+  name: string;
+  times: number;
+  quantity: number;
+  value: number;
+  topPlant: string;
+  last: string;
+};
+
+function ViewHeader({
+  title,
+  count,
+  search,
+  onSearch,
+  placeholder,
+}: {
+  title: string;
+  count: string;
+  search: string;
+  onSearch: (s: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <div
+      style={{
+        padding: "14px 20px",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <h2 style={{ fontSize: 14, color: "#ffffff", fontWeight: 600 }}>{title}</h2>
+      <span style={{ fontSize: 11, color: "#6b7280" }}>{count}</span>
+      <input
+        type="search"
+        placeholder={placeholder}
+        value={search}
+        onChange={(e) => onSearch(e.target.value)}
+        style={{
+          background: "rgba(255,255,255,0.06)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          color: "#e5e7eb",
+          borderRadius: 6,
+          fontSize: 11,
+          padding: "4px 10px",
+          outline: "none",
+          width: 240,
+          marginLeft: "auto",
+        }}
+      />
+    </div>
+  );
+}
+
+type SortDir = "asc" | "desc";
+
+function SortHeader<K extends string>({
+  label,
+  col,
+  sortCol,
+  dir,
+  onChange,
+  align = "left",
+}: {
+  label: string;
+  col: K;
+  sortCol: K;
+  dir: SortDir;
+  onChange: (col: K) => void;
+  align?: "left" | "right";
+}) {
+  const active = sortCol === col;
+  return (
+    <th
+      style={{
+        padding: "10px 14px",
+        textAlign: align,
+        color: active ? "#e5e7eb" : "#6b7280",
+        fontSize: 10,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        fontWeight: 700,
+        cursor: "pointer",
+        userSelect: "none",
+        whiteSpace: "nowrap",
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        background: "rgba(255,255,255,0.02)",
+      }}
+      onClick={() => onChange(col)}
+    >
+      {label}
+      {active ? (dir === "asc" ? " ▲" : " ▼") : ""}
+    </th>
+  );
+}
+
+function CustomersView({
+  rows,
+  onView,
+}: {
+  rows: CustomerRow[];
+  onView: (customer: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [sortCol, setSortCol] = useState<keyof CustomerRow>("orders");
+  const [dir, setDir] = useState<SortDir>("desc");
+  const toggleSort = (c: keyof CustomerRow) => {
+    if (c === sortCol) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(c);
+      setDir(c === "customer" || c === "topProduct" ? "asc" : "desc");
+    }
+  };
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? rows.filter(
+        (r) =>
+          r.customer.toLowerCase().includes(q) ||
+          r.topProduct.toLowerCase().includes(q),
+      )
+    : rows;
+  const sorted = [...filtered].sort((a, b) => {
+    const av = a[sortCol];
+    const bv = b[sortCol];
+    let cmp = 0;
+    if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return dir === "asc" ? cmp : -cmp;
+  });
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      <ViewHeader
+        title="Customers"
+        count={`${filtered.length} of ${rows.length}`}
+        search={search}
+        onSearch={setSearch}
+        placeholder="Search customer or top product…"
+      />
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        {rows.length === 0 ? (
+          <Empty>No orders yet. Create your first order to see customer breakdowns here.</Empty>
+        ) : sorted.length === 0 ? (
+          <Empty>No customers match the search.</Empty>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <SortHeader label="Customer" col="customer" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="Orders" col="orders" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Total value" col="value" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Last order" col="last" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="Top product" col="topProduct" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="Delivered" col="delivered" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Pending" col="pending" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <th
+                  style={{
+                    padding: "10px 14px",
+                    textAlign: "right",
+                    color: "#6b7280",
+                    fontSize: 10,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.06em",
+                    fontWeight: 700,
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    background: "rgba(255,255,255,0.02)",
+                  }}
+                />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.customer} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td style={{ padding: "10px 14px", color: "#ffffff", fontWeight: 500 }}>{r.customer}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>{r.orders}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#4CAF50", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{formatMoney(r.value)}</td>
+                  <td style={{ padding: "10px 14px", color: "#9ca3af", fontSize: 11 }}>{formatDate(r.last)}</td>
+                  <td style={{ padding: "10px 14px", color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 220 }}>{r.topProduct}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#86efac", fontVariantNumeric: "tabular-nums" }}>{r.delivered}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: r.pending > 0 ? "#fcd34d" : "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{r.pending}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                    <button
+                      type="button"
+                      onClick={() => onView(r.customer)}
+                      style={{
+                        background: "rgba(76,175,80,0.16)",
+                        color: "#86efac",
+                        border: "1px solid rgba(76,175,80,0.35)",
+                        borderRadius: 6,
+                        padding: "3px 10px",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      View Orders
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ProductsView({
+  rows,
+  onView,
+}: {
+  rows: ProductRow[];
+  onView: (sku: string) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [sortCol, setSortCol] = useState<keyof ProductRow>("times");
+  const [dir, setDir] = useState<SortDir>("desc");
+  const toggleSort = (c: keyof ProductRow) => {
+    if (c === sortCol) setDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortCol(c);
+      setDir(c === "name" || c === "sku" || c === "topPlant" ? "asc" : "desc");
+    }
+  };
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? rows.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.sku.toLowerCase().includes(q) ||
+          r.topPlant.toLowerCase().includes(q),
+      )
+    : rows;
+  const sorted = [...filtered].sort((a, b) => {
+    const av = a[sortCol];
+    const bv = b[sortCol];
+    let cmp = 0;
+    if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv));
+    return dir === "asc" ? cmp : -cmp;
+  });
+  return (
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      <ViewHeader
+        title="Products"
+        count={`${filtered.length} of ${rows.length}`}
+        search={search}
+        onSearch={setSearch}
+        placeholder="Search product, SKU, plant…"
+      />
+      <div style={{ overflowY: "auto", flex: 1 }}>
+        {rows.length === 0 ? (
+          <Empty>No products ordered yet.</Empty>
+        ) : sorted.length === 0 ? (
+          <Empty>No products match the search.</Empty>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr>
+                <SortHeader label="Product" col="name" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="SKU" col="sku" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="Times ordered" col="times" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Total qty" col="quantity" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Total value" col="value" sortCol={sortCol} dir={dir} onChange={toggleSort} align="right" />
+                <SortHeader label="Primary plant" col="topPlant" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <SortHeader label="Last ordered" col="last" sortCol={sortCol} dir={dir} onChange={toggleSort} />
+                <th style={{ padding: "10px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }} />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((r) => (
+                <tr key={r.sku} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <td style={{ padding: "10px 14px", color: "#ffffff", fontWeight: 500, maxWidth: 280, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</td>
+                  <td style={{ padding: "10px 14px", color: "#9ca3af", fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11 }}>{r.sku}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>{r.times}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#cbd5e1", fontVariantNumeric: "tabular-nums" }}>{r.quantity.toLocaleString()}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right", color: "#4CAF50", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{formatMoney(r.value)}</td>
+                  <td style={{ padding: "10px 14px", color: "#cbd5e1" }}>{r.topPlant}</td>
+                  <td style={{ padding: "10px 14px", color: "#9ca3af", fontSize: 11 }}>{formatDate(r.last)}</td>
+                  <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                    <button
+                      type="button"
+                      onClick={() => onView(r.sku)}
+                      style={{
+                        background: "rgba(76,175,80,0.16)",
+                        color: "#86efac",
+                        border: "1px solid rgba(76,175,80,0.35)",
+                        borderRadius: 6,
+                        padding: "3px 10px",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      View Orders
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReportsView({
+  data,
+}: {
+  data: {
+    statusCounts: Record<DisplayBucket, number>;
+    weeklyArr: [string, number][];
+    topCustomers: CustomerRow[];
+  };
+}) {
+  const total = BUCKET_ORDER.reduce((s, k) => s + data.statusCounts[k], 0);
+  const wkMax = data.weeklyArr.reduce((m, [, c]) => Math.max(m, c), 0) || 1;
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 12,
+        }}
+      >
+        <Panel title="Orders by Status">
+          {total === 0 ? (
+            <div style={{ color: "#6b7280", fontSize: 12 }}>No orders in this range.</div>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+              {BUCKET_ORDER.map((k) => {
+                const pct = (data.statusCounts[k] / total) * 100;
+                return (
+                  <li key={k}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                      <span style={{ color: "#cbd5e1" }}>{BUCKET_STYLE[k].label}</span>
+                      <span style={{ color: "#9ca3af", fontVariantNumeric: "tabular-nums" }}>
+                        {data.statusCounts[k]} ({Math.round(pct)}%)
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 3,
+                        height: 8,
+                        background: "rgba(255,255,255,0.06)",
+                        borderRadius: 4,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${pct}%`,
+                          height: "100%",
+                          background: BUCKET_STYLE[k].dot,
+                        }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel title="Orders by Week">
+          {data.weeklyArr.length === 0 ? (
+            <div style={{ color: "#6b7280", fontSize: 12 }}>No orders in this range.</div>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 5, height: 100 }}>
+                {data.weeklyArr.map(([wk, c]) => (
+                  <div
+                    key={wk}
+                    title={`${wk}: ${c}`}
+                    style={{
+                      flex: 1,
+                      height: `${Math.max(6, (c / wkMax) * 100)}%`,
+                      background: "#4CAF50",
+                      borderTopLeftRadius: 3,
+                      borderTopRightRadius: 3,
+                    }}
+                  />
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 5, marginTop: 4 }}>
+                {data.weeklyArr.map(([wk]) => (
+                  <div
+                    key={wk}
+                    style={{
+                      flex: 1,
+                      fontSize: 8,
+                      color: "#6b7280",
+                      textAlign: "center",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {wk.slice(5)}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </Panel>
+
+        <Panel title="Top Customers by Value" full>
+          {data.topCustomers.length === 0 ? (
+            <div style={{ color: "#6b7280", fontSize: 12 }}>No customers yet.</div>
+          ) : (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead>
+                <tr>
+                  <th style={reportTh}>Customer</th>
+                  <th style={{ ...reportTh, textAlign: "right" }}>Orders</th>
+                  <th style={{ ...reportTh, textAlign: "right" }}>Total value</th>
+                  <th style={{ ...reportTh, textAlign: "right" }}>Delivered</th>
+                  <th style={{ ...reportTh, textAlign: "right" }}>Pending</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.topCustomers.map((c) => (
+                  <tr key={c.customer} style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    <td style={{ padding: "8px 14px", color: "#ffffff" }}>{c.customer}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "right", color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>{c.orders}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "right", color: "#4CAF50", fontVariantNumeric: "tabular-nums", fontWeight: 600 }}>{formatMoney(c.value)}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "right", color: "#86efac", fontVariantNumeric: "tabular-nums" }}>{c.delivered}</td>
+                    <td style={{ padding: "8px 14px", textAlign: "right", color: c.pending > 0 ? "#fcd34d" : "#9ca3af", fontVariantNumeric: "tabular-nums" }}>{c.pending}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+const reportTh: React.CSSProperties = {
+  padding: "8px 14px",
+  textAlign: "left",
+  color: "#6b7280",
+  fontSize: 10,
+  textTransform: "uppercase",
+  letterSpacing: "0.06em",
+  fontWeight: 700,
+};
+
+function Panel({
+  title,
+  full,
+  children,
+}: {
+  title: string;
+  full?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 8,
+        padding: 14,
+        gridColumn: full ? "1 / -1" : undefined,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          color: "#6b7280",
+          textTransform: "uppercase",
+          letterSpacing: "0.08em",
+          fontWeight: 700,
+          marginBottom: 10,
+        }}
+      >
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ padding: 32, textAlign: "center", color: "#6b7280", fontSize: 12 }}>
+      {children}
+    </div>
+  );
+}
